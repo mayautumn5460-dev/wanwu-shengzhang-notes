@@ -27,6 +27,28 @@ We do exactly one thing: **turn what has already happened into something visible
 
 ---
 
+## Why this, and not Obsidian or KnowNote?
+
+These three tools are not in a fight — they answer different questions. Picking one is about what job you have.
+
+| | **Obsidian** | **KnowNote** | **Wanwu Shengzhang Notes** |
+|---|---|---|---|
+| It asks | "How do I structure my knowledge?" | "What does this document say?" | "What happened, and why?" |
+| AI's job | none — you build it yourself | reads your files, answers with citations | **reasons alongside you, never decides** |
+| You end up with | a wiki of linked notes | cited answers from your files | a living map of events: grew / broke / still flowing |
+| To run it | app + folder + plugins | Electron desktop app | **double-click one HTML file** |
+| Data lives in | local Markdown files | local SQLite + embeddings | **browser localStorage, export to `.json`** |
+
+- **Obsidian** hands you a blank wiki and says "structure it yourself."
+- **KnowNote** opens your documents and tells you what they contain.
+- **Wanwu Shengzhang** sits between them: the AI helps you *trace the cause → process → result* of your own life and events, but **the conclusion is always yours to draw**. Knowledge here is not stored — it *grows*, like a galaxy of concepts and a vine of happenings.
+
+Use Obsidian for a sprawling second brain. Use KnowNote to query a pile of PDFs. Use this when you want to **see the shape of your own life — what took root, what withered, what's still moving — with an AI partner that never decides for you.**
+
+> Still a prototype — see *Current status* below. The comparison above describes the intended shape, not a finished product.
+
+---
+
 ## Two modules, two maps
 
 Not because we have many features, but because **the topology of these two kinds of relationships is fundamentally different**.
