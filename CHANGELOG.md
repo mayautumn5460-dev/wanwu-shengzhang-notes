@@ -27,6 +27,20 @@
 | V26.0 | 2026-11-04 | 修手机「无分类」不能展开的 bug | index.html | 仅本地原型 |
 | V26.1 / `v1.0.0` | 2026-11-04 | 首次开源发布 | 全包 | ✅ GitHub + Release + 线上 |
 | V26.2 / `v1.0.1` | 2026-11-04 | 图片转存 IndexedDB | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
+| V26.3 / `v1.0.2` | 2026-11-04 | 顶栏改 24 节气中英并列 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
+
+### V26.3 / `v1.0.2`（2026-11-04）
+
+- 顶栏徽章从「X季的水」（一年只变 4 次、无信息量）改为**显示当前 24 节气，中英并列**，如 `霜降 · Frost Descent`。
+- 名称表取**国新办 2024 对外传播口径**（24 个词，词最短、传播量最大）。只给名字、**不写注释、不标「官方标准」** —— 术语委明确说过英译「至今仍无定论」，至少三套并行；不注释就不卷进争议，感兴趣的人自然会去搜。选定后整套定死、不混用。
+- 🔴 **实现要点：不查日期表，也不算交节日期，而是直接判断「此刻太阳视黄经落在哪一段 15° 区间」**（`Math.floor(sunLon(now)/15)*15`）。由此：
+  - 任意年份通用（2026 与 2200 同一套代码），**不需要每年更新浮动日期表**；
+  - 年初 1/1~1/5 落在上一年「冬至」区间，**跨年边界自动成立**，无需特判；
+  - 节气是全球同一瞬间的天文量，**与时区无关**，不需要 UTC+8 换算；
+  - 低精度太阳视黄经（Meeus 低精度式）只用 `Math` + `Date`，不联网、不依赖库，**双击本地 HTML 照样算**。
+- 精度实测（`prototypes/_archive/probe_solar_terms.js`）：用紫金山天文台发布的 2026 年 24 个交节时刻逐条比对，**24/24 同日，时刻最大偏差 13 分钟**；2027/2030/2050/2100/2200 各稳定算出 24 个。残差只在交节前后十几分钟内可能提前/延后切换，**不存在「显示成昨天或明天」的整日偏差**。
+- 手机窄屏（≤620px）自动只留中文节气名，避免 `Awakening of Insects` 这类长英文把顶栏挤换行；桌面中英并列。
+- 缓存 `wgs-v2` → `wgs-v3`。**AI 链路、数据层、导出导入零改动**。
 
 ### V26.2 / `v1.0.1`（2026-11-04）
 
@@ -51,7 +65,7 @@
 
 1. 改 `var VER`；**只要动过 index.html，同步改 `sw.js` 的 `var CACHE`**
 2. 在本文件登记新一行 + 简述改动与验证结果
-3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/test_idb_layer.js`
+3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/test_idb_layer.js`（图片层）与 `test_solar_terms.js`（节气层）
 4. `cp wgs-final/index.html prototypes/原型.html` 同步镜像；旧版存进 `prototypes/_archive/`
 5. 推 GitHub `main` → 新建 Release tag 并上传 `index.html` 附件
 6. 覆盖发布 WorkBuddy 在线应用（`wgs-notes` 前缀，链接不变）
@@ -61,6 +75,7 @@
 
 | 层 | 位置 | 用途 |
 |---|---|---|
+| 物理快照 | `prototypes/_archive/index_V26.2_before_terms_20261104.html` | V26.3 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.1_before_idb_20261104.html` | V26.2 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/原型_V26.0_20261104.html` | 主源文件 V26.0 副本 |
 | Git 历史 | `wgs-final/.git` | 任意提交可 `git checkout` 取回 |
