@@ -3725,11 +3725,20 @@ function renderChronicle(){
 var AIKEY='wgs_ai_cfg',AICFG=null,SERVED='';
 function loadAI(){try{var r=localStorage.getItem(AIKEY);if(r)AICFG=JSON.parse(r)}catch(e){}}
 function saveAI(){try{localStorage.setItem(AIKEY,JSON.stringify(AICFG))}catch(e){}}
+/* 预设里真正值钱的是「接口地址」：地址几年不变，模型名几个月就换一代。
+   m 只是当前能用的示例，不是白名单 —— 用户改文本框就生效，也可点「拉模型清单」拉实时 ID。
+   nt = 这一家「关闭思考」的写法。各家不统一、还会随模型版本翻脸，所以：
+   只对确认支持该写法的厂商设；不设的厂商一个额外字段都不带；
+   万一对方回 400，aiCall 会自动退成最朴素请求再试一次。 */
 var PROVIDERS={
-  deepseek:{n:'DeepSeek',url:'https://api.deepseek.com/v1/chat/completions',m:'deepseek-chat'},
-  openai:{n:'OpenAI',url:'https://api.openai.com/v1/chat/completions',m:'gpt-4o-mini'},
+  deepseek:{n:'DeepSeek',url:'https://api.deepseek.com/v1/chat/completions',m:'deepseek-flash',nt:{thinking:{type:'disabled'}}},
+  doubao:{n:'豆包 · 火山方舟',url:'https://ark.cn-beijing.volces.com/api/v3/chat/completions',m:'doubao-seed-2-1-lite-260915',nt:{thinking:{type:'disabled'}}},
+  hunyuan:{n:'腾讯混元',url:'https://api.hunyuan.cloud.tencent.com/v1/chat/completions',m:'hunyuan-turbos-latest'},
   dashscope:{n:'通义千问',url:'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',m:'qwen-plus'},
-  zhipu:{n:'智谱 GLM',url:'https://open.bigmodel.cn/api/paas/v4/chat/completions',m:'glm-4-flash'},
+  zhipu:{n:'智谱 GLM',url:'https://open.bigmodel.cn/api/paas/v4/chat/completions',m:'glm-4.6',nt:{thinking:{type:'disabled'}}},
+  minimax:{n:'MiniMax',url:'https://api.minimaxi.com/v1/chat/completions',m:'MiniMax-M2'},
+  moonshot:{n:'Kimi · 月之暗面',url:'https://api.moonshot.cn/v1/chat/completions',m:'moonshot-v1-32k'},
+  openai:{n:'OpenAI',url:'https://api.openai.com/v1/chat/completions',m:'gpt-4o-mini'},
   custom:{n:'自定义（OpenAI 兼容）',url:'',m:''}
 };
 function v(s){return esc(String(s||'')).replace(/"/g,'&quot;')}
@@ -3791,21 +3800,22 @@ function renderAI(){
    +v(_du)+'">'
    +'<input id="aiModel" placeholder="模型名" style="flex:1;min-width:0" value="'
    +v(_dm)+'"></div>'
-   +'<div style="font-size:11px;color:var(--ink3);margin-top:4px">地址填官网给的<b>根地址</b>就行，'
-   +'例如 <span class="num">https://api.deepseek.com</span>；'
-   +'后面那截 <span class="num">/v1/chat/completions</span> 会自动补上，'
-   +'你自己写全了也一样认。</div>'
+   +'<div style="font-size:11px;color:var(--ink3);margin-top:4px;line-height:1.7">'
+   +'上面选好厂商，地址会自动填成<b>完整路径</b>，不用自己拼（各家前缀不一样：'
+   +'<span class="num">/v1</span>、<span class="num">/api/v3</span>、'
+   +'<span class="num">/api/paas/v4</span> 都有）。<br>'
+   +'<b>模型名会随厂商发新版而变</b>，预填的只是当前能用的一个示例，不是清单 —— '
+   +'以官网为准，或点「拉模型清单」用你的 Key 拉一份这家当下真实可用的。</div>'
    +'<div class="row"><button class="p" onclick="aiSave()">'+(on?'更新':'启用真模型')+'</button>'
    +(on?'<button class="g" onclick="aiOff()">停用并删除</button>':'')
    +'<button class="g" onclick="aiTest()">测一下</button>'
    +'<button class="g" onclick="aiListModels()">拉模型清单</button></div>'
    +'<div id="aiModelListBox"></div>'
    +'<div class="hint" style="margin:6px 0;line-height:1.6">'
-   +'<b>推理模型要当心</b>：名字里带 reasoner / r1 / thinking / pro 的，'
-   +'会先自己想一遍再回答，那段思考一样算钱、也一样占额度 —— '
-   +'抽一篇长文可能烧掉几千 token，慢而且贵。'
-   +'<br>只做「挑知识点」这种活儿，用不带思考的普通模型更划算（DeepSeek 官方是 '
-   +'<span class="num">deepseek-chat</span>）。</div>'
+   +'<b>关于「先想再答」</b>：现在不少新模型默认就开着思考（连 DeepSeek 的快档也是），'
+   +'那段思考一样算钱、一样占额度。这里会按你选的厂商自动带上关闭思考的参数；'
+   +'<b>若你的模型不认这个参数、接口回 400，会自动去掉它再试一次</b>，不会卡死。<br>'
+   +'只做「认人、认地点、归到哪件事」这种活儿，不绕弯子的普通模型更划算也更准。</div>'
    +'<div id="aiStat" style="font-size:11px;color:var(--ink3);margin-top:6px">'
    +(on?'当前：<b style="color:#0F6E56">真模型</b> · '+v(AICFG.model)+'。'
        +'<br>请求发往 <span class="num">'+v(AICFG.url)+'</span>。'
@@ -3832,12 +3842,15 @@ function aiPickProvider(){
   var p=PROVIDERS[el('aiP').value]||PROVIDERS.custom;
   el('aiUrl').value=p.url||'';el('aiModel').value=p.m||'';
 }
-/* 地址宽容化：根地址 / /v1 / 完整路径，三种写法都接受 */
+/* 地址宽容化：根地址 / 各家版本号前缀 / 完整路径，都接受。
+   注意火山方舟是 /api/v3、智谱是 /api/paas/v4、百炼兼容模式是 /compatible-mode/v1，
+   只有 DeepSeek / 混元 / Kimi 是 /v1 —— 所以预设里一律填完整路径，别让用户自己拼。 */
 function aiNormUrl(u){
   u=String(u||'').trim().replace(/\/+$/,'');
   if(!u)return '';
   if(/chat\/completions$/.test(u))return u;
-  if(/\/v\d+$/.test(u))return u+'/chat/completions';
+  if(/\/(?:v\d+|api\/v\d+|api\/paas\/v\d+|compatible-mode\/v\d+)$/.test(u))
+    return u+'/chat/completions';
   return u+'/v1/chat/completions';
 }
 /* 读表单当前值（不管有没有保存过），模型名留空就用厂商默认那个 */
@@ -3868,37 +3881,64 @@ function aiOff(){
    旧写法只用 r.json() 然后取 choices[0].content：
    对方一旦回 400/401/404 或 {"msg":…} 这种不带 error 字段的报错体，
    content 就是空字符串 → 上层只看到"找不到 JSON"，证据全丢。 */
+/* 上一次请求的完整证据 —— 状态码、对方回的原文一字不落。
+   旧写法只用 r.json() 然后取 choices[0].content：
+   对方一旦回 400/401/404 或 {"msg":…} 这种不带 error 字段的报错体，
+   content 就是空字符串 → 上层只看到"找不到 JSON"，证据全丢。
+
+   V26.4：请求体分成「必填」和「可选」两层。可选层带关闭思考参数与 temperature。
+   各家关闭思考的写法不统一、还会随模型版本变（Kimi K3 不收 thinking、
+   MiniMax M2 关不掉、GLM-5.3 不支持 disabled），硬塞会直接 400。
+   所以对方回 400 时自动退成只含 model+messages+max_tokens 的最朴素请求再试一次 ——
+   厂商哪天改口径，最多多花一次请求，不会让整个 AI 功能挂掉。 */
 var LASTAI=null;
 function aiCall(messages,maxTok){
   var url=aiNormUrl(AICFG.url);   /* 旧配置里可能存的是根地址，发请求前统一补全 */
   if(!url)return Promise.reject(new Error('接口地址是空的'));
-  return fetch(url,{method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+AICFG.key},
-    body:JSON.stringify({model:AICFG.model,messages:messages,temperature:0.2,max_tokens:maxTok||700})
-  }).then(function(r){
-    return r.text().then(function(txt){
-      var j=null;try{j=JSON.parse(txt)}catch(e){}
-      LASTAI={http:r.status,body:String(txt||'').slice(0,800),url:url,model:AICFG.model};
-      if(!r.ok)
-        throw new Error('HTTP '+r.status+' · '
-          +((j&&(j.error&&j.error.message||j.msg||j.message))||String(txt).slice(0,200)));
-      if(!j)throw new Error('它回的不是 JSON · 开头 200 字：'+String(txt).slice(0,200));
-      if(j.error)throw new Error((j.error&&j.error.message)||JSON.stringify(j.error));
-      var msg=(j.choices&&j.choices[0]&&j.choices[0].message)||{};
-      var c=msg.content,rc=String(msg.reasoning_content||'');
-      LASTAI.reasoning=rc.length;
-      if(j.model)SERVED=String(j.model);   /* 真正干活的是哪个模型，由对方回话为准 */
-      if(!String(c||'').trim()){
-        /* 推理模型（deepseek-reasoner / v4-pro / o1 这类）会先"想"一遍再回答，
-           思考过程同样占用 max_tokens。额度给小了 → 想完了没额度回答 → content 为空。 */
-        if(rc.trim())
-          throw new Error('这是个「先想再答」的推理模型，它的思考就把输出额度吃光了'
-            +'（思考了 '+rc.length+' 字，一个字都没答出来）。'
-            +'请把额度调大，或者换用不绕弯子的普通模型（如 deepseek-chat）。');
-        throw new Error('它回了个空内容 · HTTP '+r.status+' · 原文：'+String(txt).slice(0,300));
-      }
-      return String(c);
-    });
+  var core={model:AICFG.model,messages:messages,max_tokens:maxTok||700};
+  var ext=(PROVIDERS[AICFG.p]||{}).nt||{};   /* 这一家关闭思考的写法；没配就一个字段都不带 */
+  function post(full){
+    var body={model:core.model,messages:core.messages,max_tokens:core.max_tokens};
+    if(full){
+      body.temperature=0.2;
+      Object.keys(ext).forEach(function(k){body[k]=ext[k]});
+    }
+    return fetch(url,{method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+AICFG.key},
+      body:JSON.stringify(body)}).then(function(r){
+        return r.text().then(function(txt){return {r:r,txt:txt,full:full}});
+      });
+  }
+  function read(o,first400){
+    var r=o.r,txt=o.txt,j=null;
+    try{j=JSON.parse(txt)}catch(e){}
+    LASTAI={http:r.status,body:String(txt||'').slice(0,800),url:url,model:AICFG.model,
+      plain:!o.full,first400:first400||''};
+    if(!r.ok)
+      throw new Error('HTTP '+r.status+' · '
+        +((j&&(j.error&&j.error.message||j.msg||j.message))||String(txt).slice(0,200)));
+    if(!j)throw new Error('它回的不是 JSON · 开头 200 字：'+String(txt).slice(0,200));
+    if(j.error)throw new Error((j.error&&j.error.message)||JSON.stringify(j.error));
+    var msg=(j.choices&&j.choices[0]&&j.choices[0].message)||{};
+    var c=msg.content,rc=String(msg.reasoning_content||'');
+    LASTAI.reasoning=rc.length;
+    if(j.model)SERVED=String(j.model);   /* 真正干活的是哪个模型，由对方回话为准 */
+    if(!String(c||'').trim()){
+      /* 推理模型会先"想"一遍，思考同样占用 max_tokens：
+         想完了没额度回答 → content 为空。关掉思考后这条路基本走不到，留着兜底。 */
+      if(rc.trim())
+        throw new Error('这是个「先想再答」的推理模型，它的思考就把输出额度吃光了'
+          +'（思考了 '+rc.length+' 字，一个字都没答出来）。'
+          +'请把额度调大，或者换用不绕弯子的普通模型（如 deepseek-flash）。');
+      throw new Error('它回了个空内容 · HTTP '+r.status+' · 原文：'+String(txt).slice(0,300));
+    }
+    return String(c);
+  }
+  /* 只在 400 时退让：401/402/404 是 Key、余额、模型名的问题，重试没意义 */
+  return post(true).then(function(o){
+    if(o.r.status===400)
+      return post(false).then(function(o2){return read(o2,String(o.txt||'').slice(0,300))});
+    return read(o,'');
   });
 }
 /* 去问模型商：我这个 Key 到底能用哪些模型。省得手填名字猜错 */
@@ -4220,9 +4260,14 @@ function aiDropEnhance(src){
   if(chs)sys+='\n\n【这台电脑上已经有的「事」】\n'+chs
     +'\n· 这篇若能接上其中一件，chain.name 原样照抄它的名字，isNew=false。'
     +'\n· 都接不上才 isNew=true；名字取这件事本身（如「妈的膝盖」「阳台那盆铁线莲」），不要取心情词。';
-  var body=mdClean(src.text||''),cut=body.slice(0,4000);
+  /* V26.4：一次最多送 8000 字（原来 4000）。这是「输入侧上下文上限」，
+     和下面 aiCall(...,8000) 那个「输出 token 上限」是两回事，别混。
+     超长不再只写一句「截断了」，而是把原文多少字、丢了多少字、怎么办都留在记录里。 */
+  var CUT=8000,body=mdClean(src.text||''),cut=body.slice(0,CUT);
   src._ai={at:nowStamp(),url:(typeof aiNormUrl==='function'?aiNormUrl(AICFG.url):AICFG.url)||'',
-    model:AICFG.model,state:'正在算',got:0,added:0,dropped:0,err:'',raw:'',http:'',body:''};
+    model:AICFG.model,state:'正在算',got:0,added:0,dropped:0,err:'',raw:'',http:'',body:'',
+    note:(body.length>CUT?'原文共 '+body.length+' 字，只送前 '+cut.length+' 字（后面 '
+      +(body.length-cut.length)+' 字没看）—— 想让它看全，把这篇拆成两篇更稳':'')};
   save();renderAll();
   return aiCall([{role:'system',content:sys},
     {role:'user',content:'这一篇的原文：\n'+(src.title?('标题：'+src.title+'\n'):'')+cut}],8000)
@@ -4253,7 +4298,7 @@ function aiDropEnhance(src){
      }
      src._ai.state='成了';
      src._ai.got=src._drop.skip?0:1;src._ai.added=src._drop.skip?0:1;
-     src._ai.note='送出去 '+cut.length+' 字'+(body.length>4000?'（原文太长，截断了）':'');
+     if(body.length<=CUT)src._ai.note='送出去 '+cut.length+' 字';
      save();renderAll();
      /* 让线索图重画一次（列可能刚从「家」变成「人/地点」）。
         🔴 这行若出错，绝不能把上面辛苦记下的经过冲掉 —— 所以包起来。 */
@@ -5696,7 +5741,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.3';
+var VER='V26.4';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;

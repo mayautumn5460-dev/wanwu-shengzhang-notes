@@ -28,6 +28,18 @@
 | V26.1 / `v1.0.0` | 2026-11-04 | 首次开源发布 | 全包 | ✅ GitHub + Release + 线上 |
 | V26.2 / `v1.0.1` | 2026-11-04 | 图片转存 IndexedDB | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.3 / `v1.0.2` | 2026-11-04 | 顶栏改 24 节气中英并列 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
+| V26.4 / `v1.0.3` | 2026-11-04 | AI 厂商预设补齐、关闭思考开关、点滴长文上限 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
+
+### V26.4 / `v1.0.3`（2026-11-04）
+
+- **退役别名清干净**：DeepSeek 默认模型名 `deepseek-chat` → `deepseek-flash`（前者 2026-07-24 已停用），界面提示与报错文案里的旧名一并换掉。
+- **加「关闭思考」开关**：DeepSeek 官方文档明确 `deepseek-flash` 的 `thinking` 默认为 `enabled`（先想再答），思考同样算钱、同样占输出额度。请求体按需带 `thinking:{type:'disabled'}`。
+- 🔴 **开关按厂商分发，不是全局一刀切**：各家参数不统一，还会随模型版本翻脸 —— Kimi K3 不收 `thinking`、Kimi k2.7-code 写 `disabled` 直接报错、MiniMax M2 关不掉、GLM-5.3 不支持 `disabled`。所以只对确认支持的 DeepSeek / 豆包 / 智谱 带该字段，其余厂商一个额外字段都不带。
+- **400 自动退让**：对方回 400 时，自动去掉全部可选字段（关闭思考 + `temperature`），只留 `model/messages/max_tokens` 再试一次；401/402/404 不重试（那是 Key、余额、模型名的问题）。厂商日后改参数口径，最多多花一次请求，不会让整个 AI 功能挂掉。
+- **国内六家预设补齐**：DeepSeek、豆包（火山方舟）、腾讯混元、通义千问、智谱、MiniMax、Kimi。预设里真正值钱的是**接口地址**（方舟 `/api/v3`、智谱 `/api/paas/v4`、百炼 `/compatible-mode/v1`、其余 `/v1`）；模型名只是当前可用的示例。OpenAI 兼容统一的是请求结构，`model` 里的字符串是各厂商私有命名空间，没有标准也不承诺稳定 —— 用户改文本框即生效，或点「拉模型清单」用自己 Key 拉实时 ID。`aiNormUrl` 同步认识上述三类前缀。
+- **点滴输入上限 4000 → 8000 字**：这是输入侧上下文上限，与 `aiCall(...,8000)` 的输出 token 上限是两码事。超长时记录里写明「原文共 N 字，只送前 M 字，后面 K 字没看 —— 想让它看全，拆成两篇」，不再只写一句「截断了」。
+- 缓存 `wgs-v3` → `wgs-v4`。**数据键 `KEY` 未动；导出导入、图片层、节气层零改动。**
+- 验证：`prototypes/_archive/test_ai_providers.js` —— **75 passed / 0 failed**（3 块内联脚本语法、六家预设与地址、开关按厂商分发、400 退让后只剩三项必填、401 不重试、未知厂商兜底、旧别名清除）。
 
 ### V26.3 / `v1.0.2`（2026-11-04）
 
@@ -65,7 +77,7 @@
 
 1. 改 `var VER`；**只要动过 index.html，同步改 `sw.js` 的 `var CACHE`**
 2. 在本文件登记新一行 + 简述改动与验证结果
-3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/test_idb_layer.js`（图片层）与 `test_solar_terms.js`（节气层）
+3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/test_idb_layer.js`（图片层）、`test_solar_terms.js`（节气层）、`test_ai_providers.js`（AI 厂商层）
 4. `cp wgs-final/index.html prototypes/原型.html` 同步镜像；旧版存进 `prototypes/_archive/`
 5. 推 GitHub `main` → 新建 Release tag 并上传 `index.html` 附件
 6. 覆盖发布 WorkBuddy 在线应用（`wgs-notes` 前缀，链接不变）
@@ -75,6 +87,7 @@
 
 | 层 | 位置 | 用途 |
 |---|---|---|
+| 物理快照 | `prototypes/_archive/index_V26.3_before_ai_providers_20261104.html` | V26.4 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.2_before_terms_20261104.html` | V26.3 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.1_before_idb_20261104.html` | V26.2 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/原型_V26.0_20261104.html` | 主源文件 V26.0 副本 |
