@@ -29,6 +29,21 @@
 | V26.2 / `v1.0.1` | 2026-11-04 | 图片转存 IndexedDB | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.3 / `v1.0.2` | 2026-11-04 | 顶栏改 24 节气中英并列 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.4 / `v1.0.3` | 2026-11-04 | AI 厂商预设补齐、关闭思考开关、点滴长文上限 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
+| V26.5 / `v1.0.4` | 2026-11-04 | 点格浮卡、只读要素菜单、AI 报告分层、攀附须接通 | index.html, sw.js, CHANGELOG.md | 🟡 本地 + GitHub，线上待覆盖 |
+
+### V26.5 / `v1.0.4`（2026-11-04）
+
+用户跑通 flash 后提出：「5 个格子看不出分别代表什么」「手机点格子弹的是右键菜单、桌面侧栏找不到」「AI 上一次干了什么全是术语，看着干扰但不能没有」「攀附须这个概念要留着」。四件事一起做。
+
+- **① 点一格，答案浮在格子上**：新增 `#cellTip` 绝对定位卡片（要素名 / 日期 / 这一格几篇 / 人话解释 / 「打开这一篇」/ 关闭），贴近右下边缘自动向左上翻折。原先的反馈在 `#gside`，它排在画布与 `gfoot` 之后，手机上画布高 `min(400px,44vh)` → 点完当前屏毫无变化，等于藏在屏幕外。**信息是现成的，只是换了位置**；桌面侧栏原样保留。点花、点空白、切时间粒度/画法、滚轮/拖动都收起浮卡。
+- **② 右键 / 长按改成只读要素卡**：原来 `ctxGrid` → `ctxFolder(e,nm)`，把 AI 认出的人名当文件夹名送进去，弹出「重命名 / 合并 / 删除文件夹」全是错动作。改为 `ctxEnt(e,info)`：头部仍是客人已经在用的那行要素名，下面列出这一要素出现在哪几篇、点一下打开；不再有任何文件夹动作。`GRID.colInfo(e)` 提供数据，`colAt` 保留兼容（只取名字）。`ctxFolder` 本身不动 —— 文件夹树仍在用它。
+- **③ AI 报告分三层**：常显人话一行（时间 / 成了没成 / 点滴模块写「认出 N 个要素」、知识模块写「报了 N 条落进来 M 条」/ 截断提醒 / 撤掉的花＋恢复按钮）；URL、模型名、HTTP 状态码、接口回的原文、AI 原话开头、思考字数收进 `<details class="aiRep">`，**成功收起、失败自动展开**；`s._ai` 原始数据一个字段不删（导出 `.json` 仍带，排查可复制）。折叠不是删，是收进抽屉。
+- **④ 攀附须接通**：`CLING=false` → `true`；`feed()` 取 `s._drop.others`（AI 原本就输出、也存了、详情页还显示「同篇一起出现的」，只是没喂给图）；`chainPts()` 把名字映射成列号，认不出的叫法丢掉、同篇合并取并集。三重克制原样保留：**只搭紧邻 `d<=1`、隔一个点才出一根 `q+=2`、格子小于 7px 不画**。实测面板新增「攀附的须 N 根」便于验证。
+  - 🔴 **仍需两篇才显形**：`drawVine()` 有 `if(pts.length<2)return`，须长在藤上。同一要素只在 1 篇里出现时藤本身不画，须也无处可搭 —— 这是「生长」的原意，不是漏画。
+- **文案纠错**：`GHINT_DROP` 与折叠图例里「水流分类」→「要素（人 / 地点；没接 AI 时是水流分类）」；「一条藤就是一件你一直在写的事」→「一条藤 = 一个要素」（与 `CHAINS=ORDER.map(nm)` 实际一致）；图例新增细须一条。
+- 缓存 `wgs-v4` → `wgs-v5`。**数据键 `KEY` / `AIKEY` 未动；AI 请求链路、图片层、节气层零改动。**
+- 验证：`prototypes/_archive/test_v265_celltip.js` —— **69 passed / 0 failed**（3 块内联脚本语法、浮卡内容与右下翻折与 HTML 转义、`chainPts` 名字→列号/丢弃/并集、成功收起与失败展开、原始数据不变、右键菜单无文件夹动作）。连同 `test_ai_providers.js` 75、`test_idb_layer.js` 29、`test_solar_terms.js` 84，**四套共 257 项全过**。
+- 顺手把两套测试里的版本断言改成「不低于 V26.x」，避免下次升版时历史测试因写死旧版本号误报。
 
 ### V26.4 / `v1.0.3`（2026-11-04）
 
@@ -77,7 +92,7 @@
 
 1. 改 `var VER`；**只要动过 index.html，同步改 `sw.js` 的 `var CACHE`**
 2. 在本文件登记新一行 + 简述改动与验证结果
-3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/test_idb_layer.js`（图片层）、`test_solar_terms.js`（节气层）、`test_ai_providers.js`（AI 厂商层）
+3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/` 下四套：`test_idb_layer.js`（图片层）、`test_solar_terms.js`（节气层）、`test_ai_providers.js`（AI 厂商层）、`test_v265_celltip.js`（交互与报告层）
 4. `cp wgs-final/index.html prototypes/原型.html` 同步镜像；旧版存进 `prototypes/_archive/`
 5. 推 GitHub `main` → 新建 Release tag 并上传 `index.html` 附件
 6. 覆盖发布 WorkBuddy 在线应用（`wgs-notes` 前缀，链接不变）
@@ -87,6 +102,7 @@
 
 | 层 | 位置 | 用途 |
 |---|---|---|
+| 物理快照 | `prototypes/_archive/index_V26.4_before_celltip_20261104.html` | V26.5 改前逐字节副本（同目录另有 `sw_V26.4_before_celltip_20261104.js`） |
 | 物理快照 | `prototypes/_archive/index_V26.3_before_ai_providers_20261104.html` | V26.4 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.2_before_terms_20261104.html` | V26.3 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.1_before_idb_20261104.html` | V26.2 改前逐字节副本 |

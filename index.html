@@ -306,6 +306,23 @@ body.drag .fnode.no{cursor:not-allowed}
 #gbox{position:relative;overflow:hidden;height:400px;border:1px solid var(--line);
   border-radius:9px;background:#FBFAF7}
 #pdcv{display:block}
+/* 点一格：答案浮在画布上，不让客人往下滚去找侧栏 */
+#cellTip{position:absolute;display:none;z-index:6;max-width:min(268px,86vw);
+  background:var(--card);border:1px solid var(--line2);border-radius:10px;
+  box-shadow:0 4px 16px rgba(0,0,0,.09);padding:10px 12px;font-size:12.5px;
+  color:var(--ink);line-height:1.65}
+#cellTip .ctName{font-size:14px;font-weight:500;color:var(--ink);margin-bottom:2px;padding-right:18px}
+#cellTip .ctMeta{font-size:11.5px;color:var(--ink3)}
+#cellTip .ctBtn{display:inline-block;margin-top:7px;padding:5px 11px;min-height:30px;
+  border:1px solid var(--line2);border-radius:11px;background:var(--surface);
+  color:var(--ink2);font-size:12px;cursor:pointer}
+#cellTip .ctX{position:absolute;right:6px;top:4px;border:0;background:none;
+  color:var(--ink3);font-size:16px;cursor:pointer;padding:2px 6px;line-height:1.2}
+.aiRep summary{font-size:11.5px;color:var(--ink3);cursor:pointer;padding:4px 0;list-style:none}
+.aiRep summary::-webkit-details-marker{display:none}
+.aiRep summary:before{content:'▸ ';color:var(--ink3)}
+.aiRep[open] summary:before{content:'▾ '}
+.aiRep .m{margin-top:4px}
 .gfoot{font-size:11px;color:var(--ink3);margin-top:7px;line-height:1.7}
 .gfoot b{color:var(--ink2);font-weight:500}
 .gnote{font-size:11.5px;color:#7A4E12;background:var(--amber);border:1px solid #E8DCC0;
@@ -848,7 +865,7 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
           <span class="pl">格子</span><input type="range" id="gzm" min="0" max="40" value="0">
           <span class="pl">AI</span><button id="gbrefresh" onclick="dropRefreshAll()">刷新全貌</button><button id="gbforce" onclick="dropRefreshForce()">强制全量</button><label class="pl" style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;margin-left:2px"><input type="checkbox" id="gbauto" onchange="dropAutoToggle(this.checked)">新建即认</label>
         </div>
-        <div id="gbox"><canvas id="pdcv" oncontextmenu="ctxGrid(event)"></canvas></div>
+        <div id="gbox"><canvas id="pdcv" oncontextmenu="ctxGrid(event)"></canvas><div id="cellTip"></div></div>
         <div class="gfoot" id="gfoot"></div>
         <div id="gside"></div>
       </div>
@@ -1862,13 +1879,28 @@ function delFolderAsk(a){
     }});
 }
 function ctxGrid(e){
-  if(!window.GRID||typeof GRID.colAt!=='function')return;
+  if(!window.GRID||typeof GRID.colInfo!=='function')return;
   /* 点在花上 → 花的菜单优先，不给「这一列」抢走 */
   var f=(typeof GRID.flowerAt==='function')?GRID.flowerAt(e):null;
   if(f){ctxFlower(e,f);return}
-  var nm=GRID.colAt(e);
-  if(!nm||nm==='（无分类）')return;
-  ctxFolder(e,nm);
+  var info=GRID.colInfo(e);
+  if(!info||!info.name)return;
+  ctxEnt(e,info);
+}
+/* 一列 = 一个要素，不是文件夹。
+   以前画布右键走 ctxFolder，把 AI 认出的人名当分类名送进去，
+   弹出来的全是「重命名 / 合并 / 删除文件夹」—— 对着一个姨妈名，全是错动作。
+   这里改成只读信息卡：它是什么、出现在哪几篇、点一下能打开。 */
+function ctxEnt(e,info){
+  var it=[{hd:info.name},{hd:'AI 从你写的东西里认出的一个要素'}];
+  var list=info.items||[];
+  list.slice(0,4).forEach(function(x){
+    var t=String(x.t||'');if(t.length>16)t=t.slice(0,16)+'…';
+    it.push({t:'打开《'+t+'》',fn:function(){try{GRID.open(x.i)}catch(err){}}});
+  });
+  if(list.length>4)it.push({hd:'还有 '+(list.length-4)+' 篇…'});
+  if(!list.length)it.push({hd:'这一列还没有对应的记录'});
+  ctxShow(e,it);
 }
 /* ===== 一朵花的三种状态 =====
    未表态 / 你确认过 / 你撤掉了。
@@ -4363,35 +4395,47 @@ function fRestoreAll(srcId){
   save();renderAll();try{if(window.GRID)GRID.refresh()}catch(e){}
   toast('恢复了 · 这几朵回到 AI 的判断');
 }
-/* AI 这一次的完整经过 —— 永久显示在记录里，不再靠一闪而过的 toast */
+/* AI 这一次的完整经过 —— 三层：常显人话 / 折叠技术详情 / 只存不显示。
+   花了钱就得有交代，但客人不想看 URL、HTTP、接口原文；真出问题时又必须拿得到，
+   所以是收进抽屉，不是删掉。s._ai 原始数据一个字段都不动，导出仍在。 */
 function aiReport(s){
   var a=s._ai;
   if(!a)return '';
   var ok=a.state==='成了';
   var col=ok?'#0F6E56':(a.state==='正在算'?'#5F5E5A':'#854F0B');
   var h='<div class="dsec"><h3>AI 上一次干了什么</h3>'
-    +'<div class="m">'+esc(a.at.slice(5,16))+' · <b style="color:'+col+'">'+esc(a.state)+'</b>'
-    +' · 模型 <span class="num">'+esc(a.model||'?')+'</span></div>'
-    +'<div class="m" style="word-break:break-all">发往 <span class="num">'+esc(a.url||'?')+'</span></div>';
+    +'<div class="m">'+esc(a.at.slice(5,16))+' · <b style="color:'+col+'">'+esc(a.state)+'</b>';
+  /* 常显层：它到底做没做、做成什么样 —— 全用能懂的话 */
+  if(ok){
+    if((s.mod||'')==='点滴模块'&&s._drop&&!s._drop.skip&&s._drop.ents)
+      h+=' · 认出 <b>'+s._drop.ents.length+'</b> 个要素';
+    else
+      h+=' · 它报了 <b>'+a.got+'</b> 条，落进来 <b>'+a.added+'</b> 条'
+        +(a.dropped?'，'+a.dropped+' 条太长没要':'')
+        +(a.muted?'，<b>'+a.muted+' 条是你删过的</b>（照你的意思没再放进列表）':'');
+  }
+  h+='</div>';
   if(a.err)h+='<div class="m" style="color:#854F0B">原因：'+esc(a.err)+'</div>';
-  if(a.http)h+='<div class="m">HTTP 状态码 <span class="num">'+esc(a.http)+'</span>'
-    +'（200 = 通了；401 = Key 不对；404 = 地址或模型名不对；402 = 没钱了）</div>';
-  if(a.body)h+='<div class="m" style="margin-top:5px;color:#5F5E5A">接口回的原文：'
-    +'<div class="dtext" style="max-height:150px;margin-top:3px">'+esc(a.body)+'</div></div>';
-  if(a.reason)h+='<div class="m" style="color:#5F5E5A">它是个「先想再答」的推理模型'
-    +' —— 光思考就用了 '+a.reason+' 字（这部分也要烧钱）</div>';
   if(a.note)h+='<div class="m">'+esc(a.note)+'</div>';
-  if(a.state==='成了')
-    h+='<div class="m">它报了 <b>'+a.got+'</b> 条，落进来 <b>'+a.added+'</b> 条'
-      +(a.dropped?'，'+a.dropped+' 条太长没要':'')
-      +(a.muted?'，<b>'+a.muted+' 条是你删过的</b>（照你的意思没再放进列表）':'')+'</div>';
-  /* 撤掉的花要有个长期的出口 —— toast 上那次「撤销」过了也没关系，这里一直能找回 */
+  /* 撤掉的花要有个长期的出口 —— 这是给客人用的动作，不是术语，必须常显 */
   var rj=fRejOf(s.id);
   if(rj.length)
     h+='<div class="m" style="color:#854F0B">你撤掉的花：'+esc(rj.join('、'))
       +' —— <button class="g sm" onclick="fRestoreAll(\''+s.id+'\')">恢复</button></div>';
-  if(a.raw)h+='<div class="m" style="margin-top:5px;color:var(--ink3)">它原话的开头：'
+  /* 技术详情：成功收起，失败自动摊开 —— 只有这时候才需要看状态码和原文 */
+  var fail=!ok&&!!(a.err||a.http||a.body||a.raw);
+  var d='<div class="m">模型 <span class="num">'+esc(a.model||'?')+'</span></div>'
+    +'<div class="m" style="word-break:break-all">发往 <span class="num">'+esc(a.url||'?')+'</span></div>';
+  if(a.http)d+='<div class="m">HTTP 状态码 <span class="num">'+esc(a.http)+'</span>'
+    +'（200 = 通了；401 = Key 不对；404 = 地址或模型名不对；402 = 没钱了）</div>';
+  if(a.body)d+='<div class="m" style="margin-top:5px;color:#5F5E5A">接口回的原文：'
+    +'<div class="dtext" style="max-height:150px;margin-top:3px">'+esc(a.body)+'</div></div>';
+  if(a.reason)d+='<div class="m" style="color:#5F5E5A">它是个「先想再答」的推理模型'
+    +' —— 光思考就用了 '+a.reason+' 字（这部分也要烧钱）</div>';
+  if(a.raw)d+='<div class="m" style="margin-top:5px;color:var(--ink3)">它原话的开头：'
     +'<div class="dtext" style="max-height:120px;margin-top:3px">'+esc(a.raw)+'</div></div>';
+  h+='<details class="aiRep"'+(fail?' open':'')+'>'
+    +'<summary>技术详情 · 出问题时要给客服看的</summary>'+d+'</details>';
   return h+'</div>';
 }
 /* 详情里的正文：markdown 排好版给你看，一键切回原文（原文永远不丢、不被改写） */
@@ -5741,7 +5785,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.4';
+var VER='V26.5';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
@@ -5768,7 +5812,8 @@ var GHINT_KNOW='这是<b>知识模块</b>的样子 —— 它更看重知识的<
   +'中心最亮的那颗不是起点，是<b>汇流口</b>：你<b>通水</b>的那些知识点才是源头（涓流），'
   +'水从末梢往里汇，越靠中心越粗、级别越高。';
 var GHINT_DROP='这里是<b>点滴模块</b>生长的样子 —— 它更看重事物之间的关连，提供新的观察角度。<br>'
-  +'一格 = 一段时间 × 一个水流分类，亮 = 那段时间你在那个水流分类保存的分类；一条藤就是一件你一直在写的事，从最早那篇向上生长 —— 还在生长的就是你还在记录的，停止记录则不再生长。<br>'
+  +'一格 = 一段时间 × 一个要素，亮 = 那段时间它出现在你写的东西里（接了 AI，要素就是它认出的人或地点；没接 AI 时先拿水流分类充数）。一条藤 = 一个要素，从最早那篇向上生长 —— 还在生长的就是你还在记录的，停止记录则不再生长。<br>'
+  +'藤上搭到隔壁格子的细须，说的是「写这一篇的时候，那位也在场」；只搭紧邻、隔一个点才出一根。<br>'
   +'本机规则只长藤蔓和格子 —— 一朵花都不开：花的开放有AI根据记录来源参与判断，但是AI不决策花开的最终形态。';
 function syncModCard(){
   var c=el('modCard');if(!c)return;
@@ -5802,7 +5847,9 @@ function fkeyOf(i,id){
   return (d&&d.src?d.src:'?')+'|'+chainName(id);
 }
 function fstate(k){var v=S.fconf&&S.fconf[k];return (v===1||v===0)?v:undefined}
-var LOD='ent',DRAW='vine',ZOOM=0,CLING=false,SPECIES='clematis',REVIEW=false,AIBLOOM=true,AIK=5;
+/* V26.5：攀附须接通，数据来自 AI 的 others（同篇一起出现的要素）。
+   三重克制仍留着：只搭紧邻、隔一个点才出一根、格子太小就不画 —— 须是配角。 */
+var LOD='ent',DRAW='vine',ZOOM=0,CLING=true,SPECIES='clematis',REVIEW=false,AIBLOOM=true,AIK=5;
 var MODE='local';                 /* 本机规则：接了模型才开花 */
 var EMPTY=false,PICK=null;
 var STAT={rows:0,cols:0,lit:0,stem:0,leaf:0,flower:0,bud:0,aiopen:0,mine:0,rej:0,surp:0,cling:0,intro:''};
@@ -5823,6 +5870,8 @@ function feed(){
                模型认出人 / 地点之后，列才变成真正的人 / 地点。 */
             ents:(ok&&d.ents&&d.ents.length)?d.ents.map(function(e){return e.name})
                  :[s.folder&&s.folder!=='点滴模块'?s.folder:'（无分类）'],
+            /* 同篇一起出现的其他要素 —— 攀附须的数据来源。名字对不上列就自然丢掉。 */
+            oth:(ok&&d.others)||[],
             t:s.title||autoTitle(s.text||'')||'（没有标题）',
             txt:s.text||'',src:s.id,c:i+1,r:-1,i:i,
             /* 角色（0 起因 / 1 经过 / 2 结果）与把握度 —— 花只开在 2 上 */
@@ -5864,13 +5913,20 @@ function chainWeight(){
   });
 }
 function chainPts(id){
-  var nm=chainName(id),out=[];
+  var nm=chainName(id),out=[],myCol=ORDER.indexOf(nm);
   DIARY.forEach(function(e,i){
     if(entsOf(e).indexOf(nm)<0)return;
-    var p={row:rowOf(i),col:ORDER.indexOf(nm),i:i,r:e.role,others:[]};
+    /* 把「同篇一起出现的名字」换成列号 —— 攀附须在画布上只认坐标。
+       AI 若写了个没在 ents 里出现过的叫法，直接丢掉，不猜。 */
+    var others=(e.oth||[]).map(function(x){return ORDER.indexOf(x)})
+      .filter(function(c){return c>=0&&c!==myCol});
+    var p={row:rowOf(i),col:myCol,i:i,r:e.role,others:others};
     var last=out[out.length-1];
     /* 同一行（同一段时间）合成一个节点 —— 角色取这一段时间里最新的那一篇 */
-    if(last&&last.row===p.row){last.i=i;if(e.role>=0)last.r=e.role;}
+    if(last&&last.row===p.row){
+      last.i=i;if(e.role>=0)last.r=e.role;
+      others.forEach(function(c){if(last.others.indexOf(c)<0)last.others.push(c)});
+    }
     else out.push(p);
   });
   return out;
@@ -6481,6 +6537,7 @@ function side(){
     +'<div class="kv"><span>亮起的格子</span><b>'+STAT.lit+'</b></div>'
     +'<div class="kv"><span>藤 · 茎</span><b>'+STAT.stem+'</b></div>'
     +'<div class="kv"><span>叶</span><b>'+STAT.leaf+'</b></div>'
+    +'<div class="kv"><span>攀附的须</span><b>'+STAT.cling+'</b></div>'
     +'<div class="kv"><span>格子边长</span><b>'+CELL+'px</b></div>'
     +'<div class="kv"><span>藤间最小色差 ΔE</span><b>'+STAT.minde.toFixed(1)+'</b></div>'
     +'<div class="kv"><span>候选色池</span><b>'+POOLN+'</b></div>'
@@ -6490,10 +6547,12 @@ function side(){
     +'<b>不推荐：</b>网上转来的鸡汤、别人的金句、为了发朋友圈写的那段话。如果真的想记，最好带上自己的感想，评论。<br>'
     +'初衷都来源于：看见你自己。</div>'
     +'<details><summary>图例</summary>'
-    +'<div class="lg"><span class="sw" style="background:#9FE1CB"></span>格子的色相 = 哪个水流分类</div>'
+    +'<div class="lg"><span class="sw" style="background:#9FE1CB"></span>格子的色相 = 哪个要素（人 / 地点；没接 AI 时是水流分类）</div>'
     +'<div class="lg"><span class="sw" style="background:#B4B2A9"></span>格子的深浅 = 这段时间存得多不多</div>'
     +'<div class="lg"><span class="sw" style="background:#A2CF76"></span>叶子只是「这是藤」的记号，不编码数据</div>'
-    +'<div class="note" style="margin-top:6px">茎越细越淡 = 中间隔了一段日子（<b>格子仍留白</b>，只有茎跨过去）。<br>'
+    +'<div class="lg"><span class="sw" style="background:#D85A30"></span>搭到隔壁的细须 = 写这一篇时，那位也在场</div>'
+    +'<div class="note" style="margin-top:6px">须只搭紧邻、隔一个点才出一根 —— 隔得远的不画，不是不重要，是怕把藤埋了。<br>'
+    +'茎越细越淡 = 中间隔了一段日子（<b>格子仍留白</b>，只有茎跨过去）。<br>'
     +'植物种类是<b>整幅图统一的皮</b>，不代表任何数据。<br>'
     +'本机规则下<b>一朵花都不开</b> —— 花是一次判断，判断得有来源。</div>'
     +'</details></div>';
@@ -6501,6 +6560,29 @@ function side(){
 }
 
 /* ---------- 交互 ---------- */
+/* 点一格的答案，就浮在这一格旁边 —— 手机不用滚到画布下面找侧栏。
+   信息是现成的（side() 里那套），这里只是换个位置呈现。 */
+var CELLTIP=null;
+function tipHide(){
+  CELLTIP=null;
+  var t=document.getElementById('cellTip');if(t){t.style.display='none';t.innerHTML=''}
+}
+function tipShow(o,px,py){
+  var t=document.getElementById('cellTip');if(!t||!o)return;
+  var d=DIARY[o.ids[0]]||{},k=o.ids.length,nm=esc(o.ent);
+  var when=LOD==='ent'?'这一篇':(LOD==='mon'?'这一月':'这一季');
+  CELLTIP=o;
+  t.innerHTML='<button class="ctX" onclick="GRID.tipClose()" aria-label="关掉">×</button>'
+    +'<div class="ctName">'+nm+'</div>'
+    +'<div class="ctMeta">'+esc((d.d||'')+(k>1?' · 这一格里 '+k+' 篇':''))+'</div>'
+    +'<div class="ctMeta" style="margin-top:3px">这一格 = '+when+'里，它出现在你写的东西中</div>'
+    +'<span class="ctBtn" onclick="GRID.open('+o.ids[0]+')">打开这一篇</span>';
+  t.style.display='block';
+  var w=t.offsetWidth,h=t.offsetHeight,x=px+12,y=py+10;
+  if(x+w>VW-6)x=Math.max(6,px-w-12);
+  if(y+h>VH-6)y=Math.max(6,py-h-10);
+  t.style.left=x+'px';t.style.top=y+'px';
+}
 function btn(id,on){var b=el(id);if(b)b.className=on?'on':''}
 function syncBtn(){
   btn('gbq',LOD==='q');btn('gbmon',LOD==='mon');btn('gbent',LOD==='ent');
@@ -6512,7 +6594,7 @@ cv.addEventListener('wheel',function(e){
   if(maxOff()<=0)return;                       /* 图没超出 —— 滚轮还给页面 */
   var d=e.deltaY;
   if((OFF<=0&&d<0)||(OFF>=maxOff()&&d>0))return; /* 到头了，也还给页面 */
-  e.preventDefault();OFF+=d;draw();
+  e.preventDefault();tipHide();OFF+=d;draw();
 },{passive:false});
 /* 手机没有滚轮 —— 一指在图上上下拖，等价于滚轮。
    🔴 规矩跟滚轮一样：图没超出、或者已经到头了，就一律不拦，把手势还给页面滚动。 */
@@ -6527,7 +6609,7 @@ cv.addEventListener('touchmove',function(e){
   if(nv<0)nv=0;
   if(nv>maxOff())nv=maxOff();
   if(nv===OFF)return;
-  e.preventDefault();OFF=nv;draw();
+  e.preventDefault();tipHide();OFF=nv;draw();
 },{passive:false});
 cv.addEventListener('touchend',function(){PDT=null});
 cv.addEventListener('touchcancel',function(){PDT=null});
@@ -6579,13 +6661,14 @@ function flowerTap(f){
 cv.addEventListener('click',function(e){
   if((cv._lp||0)+800>Date.now())return;      /* 刚长按出菜单 —— 这一下点击不算 */
   var f=flowerAt(e);
-  if(f){flowerTap(f);return}          /* 点在花上 —— 不给格子抢 */
+  if(f){tipHide();flowerTap(f);return} /* 点在花上 —— 不给格子抢 */
   var r=cv.getBoundingClientRect();
   var x=e.clientX-r.left,y=e.clientY-r.top+OFF;
   var c=Math.floor((x-GX)/CELLW),rr=Math.floor((CONT-y)/CELL);
-  if(c<0||c>=COLS_N||rr<0||rr>=ROWS){PICK=null;draw();return}
+  if(c<0||c>=COLS_N||rr<0||rr>=ROWS){PICK=null;tipHide();draw();return}
   var C=cells(),o=C[rr+'_'+c];
   PICK=o||null;draw();
+  if(o)tipShow(o,x,y-OFF);else tipHide();
 });
 var rz=null;
 window.addEventListener('resize',function(){clearTimeout(rz);rz=setTimeout(function(){draw()},120)});
@@ -6596,25 +6679,34 @@ var GHINT='现在是<b>本机规则</b>：只把你记下的东西长成藤蔓�
   +'接了模型，花才开，列也会从「水流分类」变成它认出的人和地点。';
 
 window.GRID={
-  lod:function(m){LOD=m;OFF=0;syncBtn();draw()},
-  dw:function(m){DRAW=m;syncBtn();draw()},
-  sp:function(v){SPECIES=v;syncBtn();draw()},
+  lod:function(m){LOD=m;OFF=0;tipHide();syncBtn();draw()},
+  dw:function(m){DRAW=m;tipHide();syncBtn();draw()},
+  sp:function(v){SPECIES=v;tipHide();syncBtn();draw()},
   open:function(i){var d=DIARY[i];if(d&&d.src)openSrc(d.src)},
-  /* 右键：这一列是哪个「家」—— 交给外面的右键菜单 */
-  colAt:function(e){
+  tipClose:tipHide,
+  /* 右键 / 长按：这一列是哪个要素、它出现在哪几篇 —— 只读，不做文件夹动作 */
+  colInfo:function(e){
     if(!cv)return null;
     var r=cv.getBoundingClientRect();
     var x=e.clientX-r.left,y=e.clientY-r.top+OFF;
     var c=Math.floor((x-GX)/CELLW),rr=Math.floor((CONT-y)/CELL);
     if(c<0||c>=COLS_N||rr<0||rr>=ROWS)return null;
-    return ORDER[c]||null;
+    var nm=ORDER[c];if(!nm)return null;
+    var items=[];
+    DIARY.forEach(function(d,i){
+      if(d.ents.indexOf(nm)<0)return;
+      items.push({t:d.t,i:i});
+    });
+    return {name:nm,items:items};
   },
+  /* 兼容旧调用：只取名字 */
+  colAt:function(e){var o=this.colInfo(e);return o?o.name:null},
   /* 右键点在花上：把这朵花交给外面的菜单（状态 + 确认 / 撤掉） */
   flowerAt:function(e){return flowerAt(e)},
   /* 切到点滴模块 / 数据变了：重画 */
   refresh:function(){
     var e=el('gmdHint');if(e)e.innerHTML=GHINT;
-    syncBtn();PICK=null;OFF=0;draw();
+    tipHide();syncBtn();PICK=null;OFF=0;draw();
   }
 };
 syncBtn();

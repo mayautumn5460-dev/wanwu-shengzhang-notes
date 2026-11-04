@@ -7,7 +7,7 @@
 
    导航请求走「网络优先、拿不到再用缓存」——在线时总是新版，断网时用缓存。
    跨域请求（AI 接口）一律不碰，直接放行。 */
-var CACHE = 'wgs-v4';
+var CACHE = 'wgs-v5';
 var Q = self.location.search || '';
 var KEY = './index.html';
 
