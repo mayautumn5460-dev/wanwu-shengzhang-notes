@@ -29,7 +29,7 @@
 | V26.2 / `v1.0.1` | 2026-11-04 | 图片转存 IndexedDB | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.3 / `v1.0.2` | 2026-11-04 | 顶栏改 24 节气中英并列 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.4 / `v1.0.3` | 2026-11-04 | AI 厂商预设补齐、关闭思考开关、点滴长文上限 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
-| V26.5 / `v1.0.4` | 2026-11-04 | 点格浮卡、只读要素菜单、AI 报告分层、攀附须接通 | index.html, sw.js, CHANGELOG.md | 🟡 本地 + GitHub，线上待覆盖 |
+| V26.5 / `v1.0.4` | 2026-11-04 | 点格浮卡、只读要素菜单、AI 报告分层、攀附须接通 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
 
 ### V26.5 / `v1.0.4`（2026-11-04）
 
