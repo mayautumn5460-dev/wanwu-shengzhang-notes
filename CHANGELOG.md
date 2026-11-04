@@ -30,6 +30,22 @@
 | V26.3 / `v1.0.2` | 2026-11-04 | 顶栏改 24 节气中英并列 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.4 / `v1.0.3` | 2026-11-04 | AI 厂商预设补齐、关闭思考开关、点滴长文上限 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.5 / `v1.0.4` | 2026-11-04 | 点格浮卡、只读要素菜单、AI 报告分层、攀附须接通 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
+| V26.6 / `v1.0.5` | 2026-11-05 | 单实例草稿：打字自动存、归档才是唯一出口 | index.html, sw.js, CHANGELOG.md | 🟡 本地 + GitHub，线上待覆盖 |
+
+### V26.6 / `v1.0.5`（2026-11-05）
+
+用户在手机上写一篇长记录时「老担心字没存上」，却不愿按那两个模块按钮 —— 查代码确认**这不是心理作用**：`inText` 的 `oninput` 只做 `[[` 双链补全，一个字都不往本地存，也没有切后台/刷新兜底。而两个按钮是「归档＋清空＋开工」（知识模块还会立刻触发一次 AI），写一半按它等于自己打断自己。用户同时问出关键矛盾：「加个保存按钮，它保存在哪个模块呢？说不通。」
+
+- **答：正在写的字不属于任何模块，它是第三种状态 —— 草稿。** 但草稿不是一个容器，是「此刻框里这段字」的**一张快照**。框只有一份 → 快照只有一份；一边写一边覆盖自己，不攒第二张。用户明确加了一条硬规矩：**必须上一个草稿归档，才会出现下一个草稿**，照此实现。
+- **独立两个小键，不塞进 `KEY`**：`wgs_draft`（文字 + 时间）、`wgs_draft_imgs`（待存图片）。文字很小、停手才写；图片只在增删时写，避免每敲一字重写整包笔记或重写几 MB 图片。正式数据 `wgs_v1` 与导出 `.json` 一个字都不带草稿。
+- **不加任何按钮**：输入框下常显一行小字 —— 空时「写下的字会自动存成草稿 · 不用点保存」，有草稿时绿点亮起「草稿已存 · N 字 · 还没归到任何模块」。它不替用户分类，反而把没做的决定摆在眼前。
+- **三个时机**：`draftKick()` 输入防抖 800ms 写入；`draftBoot()` 开机把文字和待存图填回输入框并提示「上次没写完，接着写」；`visibilitychange` / `pagehide` 立刻补写，覆盖切后台、刷新、手滑返回。
+- 🔴 **唯一出口是归档成功**：`save()` 改为返回成败，`saveSource()` 里 `if(ok)draftClear()`。存不上就一个字不清，下次打开还能接着写。切后台补写另加一层保守规则：框空而草稿还有字时不覆盖（归档失败正是这个形状），只有用户主动删空才清。
+- 🔴 **单实例闸门**：`fillDemoText()` 走 `draftGuard()` —— 草稿还在时不新建、不静默覆盖，弹出「这段还没归档」并只给两个模块选项；归档成功才填示例，失败则明确不开新段。因此「想开新篇只能先给旧的定归宿」，分类不是被稀释，而是成了唯一出路。**没有草稿箱、没有草稿列表**（那会变成待办清单、主动派作业）。
+- 工具条 `mdIns` / `mdLine` / `mdBlk` 与双链插入 `mdInsertLink` 补写草稿（这些是程序改 `value`，不触发 `input`）；图片新增 `acceptImgFiles` 与删除 `dropPend` 同步图片键。
+- **编辑已存记录不走草稿**：那条路用的是 `edText`，字本来就在正式笔记里。手机与电脑各存各的草稿，属两台设备互不往来，不算第二份。
+- 缓存 `wgs-v5` → `wgs-v6`。**数据键 `KEY` / `AIKEY` 未动；AI 请求链路、点滴生长图、图片层、节气层零改动。**
+- 验证：新增 `prototypes/_archive/test_v266_draft.js` —— **69 passed / 0 failed**（3 块内联脚本语法、防抖只留一个待执行、只写独立键、状态行文案与字数、切后台保守保留、图片独立键、归档成功才清 / 失败不清、单实例闸门成功与失败两条路径、开机恢复文字与图片、导出不含草稿键、草稿层无任何新按钮）。连同旧四套 69 + 75 + 29 + 84，**五套共 326 项全过**。
 
 ### V26.5 / `v1.0.4`（2026-11-04）
 
@@ -92,7 +108,7 @@
 
 1. 改 `var VER`；**只要动过 index.html，同步改 `sw.js` 的 `var CACHE`**
 2. 在本文件登记新一行 + 简述改动与验证结果
-3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/` 下四套：`test_idb_layer.js`（图片层）、`test_solar_terms.js`（节气层）、`test_ai_providers.js`（AI 厂商层）、`test_v265_celltip.js`（交互与报告层）
+3. 语法校验（Node `vm` 编译内联脚本）+ 跑 `prototypes/_archive/` 下五套：`test_idb_layer.js`（图片层）、`test_solar_terms.js`（节气层）、`test_ai_providers.js`（AI 厂商层）、`test_v265_celltip.js`（交互与报告层）、`test_v266_draft.js`（草稿层）
 4. `cp wgs-final/index.html prototypes/原型.html` 同步镜像；旧版存进 `prototypes/_archive/`
 5. 推 GitHub `main` → 新建 Release tag 并上传 `index.html` 附件
 6. 覆盖发布 WorkBuddy 在线应用（`wgs-notes` 前缀，链接不变）
@@ -102,6 +118,7 @@
 
 | 层 | 位置 | 用途 |
 |---|---|---|
+| 物理快照 | `prototypes/_archive/index_V26.5_before_draft_20261105.html` | V26.6 改前逐字节副本（同目录另有 `sw_V26.5_before_draft_20261105.js`） |
 | 物理快照 | `prototypes/_archive/index_V26.4_before_celltip_20261104.html` | V26.5 改前逐字节副本（同目录另有 `sw_V26.4_before_celltip_20261104.js`） |
 | 物理快照 | `prototypes/_archive/index_V26.3_before_ai_providers_20261104.html` | V26.4 改前逐字节副本 |
 | 物理快照 | `prototypes/_archive/index_V26.2_before_terms_20261104.html` | V26.3 改前逐字节副本 |

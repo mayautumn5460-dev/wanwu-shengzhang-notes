@@ -362,6 +362,13 @@ body.drag .fnode.no{cursor:not-allowed}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
 textarea{width:100%;min-height:110px;padding:11px 12px;border:1px solid var(--line2);
   border-radius:8px;font:inherit;font-size:13px;line-height:1.7;resize:vertical;background:var(--surface);color:var(--ink)}
+/* 草稿状态：一行常显的小字，不给按钮、不替人做决定 */
+.dstat{font-size:11px;color:var(--ink3);margin:5px 0 0;line-height:1.6;min-height:17px}
+.dstat.on{color:#0F6E56}
+.dstat i{display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:#B4B2A9;margin-right:6px;vertical-align:middle}
+.dstat.on i{background:#1D9E75}
+.dstat b{font-weight:500}
 select,input[type=text]{font:inherit;font-size:13px;padding:6px 9px;border:1px solid var(--line2);
   border-radius:7px;background:var(--surface);color:var(--ink)}
 .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
@@ -791,7 +798,8 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
       <div class="hint">读书笔记、复盘、闪念、从别处复制来的一段话，都行。存的时候不会打扰你。</div>
       <div id="engineTag"></div>
       <div id="mdBar"></div>
-      <textarea id="inText" placeholder="记录想看见的自己" oninput="mdLinkAC(this)"></textarea>
+      <textarea id="inText" placeholder="记录想看见的自己" oninput="mdLinkAC(this);draftKick()"></textarea>
+      <div id="draftStat" class="dstat"></div>
       <div class="modpick" id="modPick">
         <button class="p modbtn know" onclick="saveSource('知识模块')">存下来 · 知识模块</button>
         <button class="p modbtn drop" onclick="saveSource('点滴模块')">存下来 · 点滴模块</button>
@@ -1185,6 +1193,7 @@ function mdIns(id,pre,post){
   t.focus();
   var p=a+pre.length;
   try{t.setSelectionRange(sel?p+sel.length:p,sel?p+sel.length:p)}catch(e){}
+  if(id==='inText')draftKick();
 }
 /* 标题 / 列表 / 引用：给光标所在的这一行加前缀 */
 function mdLine(id,pfx){
@@ -1194,6 +1203,7 @@ function mdLine(id,pfx){
   t.value=v.slice(0,ls)+pfx+v.slice(ls);
   t.focus();
   try{var p=a+pfx.length;t.setSelectionRange(p,p)}catch(e){}
+  if(id==='inText')draftKick();
 }
 function mdBlk(id,txt){
   var t=el(id);if(!t)return;
@@ -1202,6 +1212,7 @@ function mdBlk(id,txt){
   var pre=(a&&v.charAt(a-1)!=='\n')?'\n':'';
   t.value=v.slice(0,a)+pre+txt+'\n'+v.slice(b);
   t.focus();
+  if(id==='inText')draftKick();
 }
 function el(id){return document.getElementById(id)}
 /* 需要带一个动作时（比如「撤销」）传 actLabel + actFn。
@@ -1228,13 +1239,117 @@ function load(){try{var r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e
   if(!S.fconf)S.fconf={};
 }
 function save(){
-  try{localStorage.setItem(KEY,JSON.stringify(S))}
+  try{localStorage.setItem(KEY,JSON.stringify(S));return true}
   catch(e){
     /* V26.2：以前这里静默吞掉，空间满时新笔记根本没存进去却毫无提示。
-       现在明确报警，让人有机会先导出备份。 */
+       现在明确报警，让人有机会先导出备份。V26.6 起返回成败，草稿据此决定清不清。 */
     try{toast('存不下了：本地空间满，请先到「数据」导出备份')}catch(e2){}
+    return false;
   }
 }
+
+/* ===== V26.6 草稿：一张快照，不是第二个容器 =====
+   1) 独立两个小键，绝不塞进 KEY（wgs_v1）—— 每敲一字重写整包会卡。
+      文字一个键（很小，停手才写），待存图片另一个键（只在图片变动时写）。
+   2) 草稿不归任何模块，它只是「此刻框里这段字」的快照。框只有一份 →
+      草稿只有一份；你一边写它一边覆盖自己，不会攒出第二张。
+   3) 唯一出口是归档成功。没归档就不清，也就不存在第二张草稿。
+   4) 编辑已存记录走的是 edText，跟这里完全无关。 */
+var DKEY='wgs_draft',DIMGKEY='wgs_draft_imgs',DTIMER=null;
+function draftRead(){
+  try{var o=JSON.parse(localStorage.getItem(DKEY)||'null');
+      return (o&&typeof o.text==='string')?o:null}catch(e){return null}
+}
+function draftImgs(){
+  try{var a=JSON.parse(localStorage.getItem(DIMGKEY)||'[]');
+      return (a&&a.length)?a.filter(function(x){return typeof x==='string'}):[]}catch(e){return []}
+}
+function draftHas(){
+  var d=draftRead();
+  return !!((d&&d.text.trim())||draftImgs().length);
+}
+/* allowEmpty=false 用于「切后台/离开」时的补写：框空而草稿还有字，
+   宁可多留一张，也别把刚写完的一整篇抹掉（归档失败时正是这个形状）。 */
+function draftPutText(t,allowEmpty){
+  if(!t&&!allowEmpty){var old=draftRead();if(old&&old.text)return true}
+  try{
+    if(!t)localStorage.removeItem(DKEY);
+    else localStorage.setItem(DKEY,JSON.stringify({text:t,at:nowStamp()}));
+    return true;
+  }catch(e){
+    try{toast('草稿没存上：本地空间满，先导出备份')}catch(e2){}
+    return false;
+  }
+}
+function draftSyncImgs(){
+  try{
+    if(!PEND_IMG.length)localStorage.removeItem(DIMGKEY);
+    else localStorage.setItem(DIMGKEY,JSON.stringify(PEND_IMG));
+  }catch(e){
+    /* 图太大装不下也不打断写作：文字照存，只是这几张图下次可能得重贴 */
+    try{toast('草稿里的图没存上（空间满），文字是存好的')}catch(e2){}
+  }
+}
+function draftStat(){
+  var b=el('draftStat');if(!b)return;
+  var d=draftRead(),n=d?d.text.length:0,im=draftImgs().length;
+  if(n||im){
+    b.className='dstat on';
+    b.innerHTML='<i></i>草稿已存 · '+n+' 字'+(im?' · '+im+' 张待存的图':'')
+      +' · <b>还没归到任何模块</b>';
+  }else{
+    b.className='dstat';
+    b.innerHTML='<i></i>写下的字会自动存成草稿 · 不用点保存';
+  }
+}
+function draftKick(){
+  clearTimeout(DTIMER);
+  DTIMER=setTimeout(function(){
+    var ta=el('inText');if(!ta)return;
+    draftPutText(ta.value,true);draftStat();
+  },800);
+}
+function draftFlush(){          /* 切后台 / 刷新 / 手滑返回：立刻补写，不等防抖 */
+  clearTimeout(DTIMER);
+  var ta=el('inText');if(ta)draftPutText(ta.value,false);
+  draftStat();
+}
+function draftClear(){
+  clearTimeout(DTIMER);
+  try{localStorage.removeItem(DKEY);localStorage.removeItem(DIMGKEY)}catch(e){}
+  draftStat();
+}
+/* 开机：有草稿就填回框里，附一句「接着写」 */
+function draftBoot(){
+  var d=draftRead(),ims=draftImgs();
+  if(!((d&&d.text)||ims.length)){draftStat();return}
+  var ta=el('inText');
+  if(ta&&d)ta.value=d.text;
+  if(ims.length){PEND_IMG=ims;renderPendImg()}
+  draftStat();
+  var b=el('savedBox');
+  if(b)b.innerHTML='<div class="saved">上次没写完，接着写 · 这段还只是草稿，'
+    +'<b>还没归到任何模块</b>。想好归处了，点上面两个按钮之一。</div>';
+}
+/* 想换掉框里的内容时：先请旧草稿归档，归档成功才轮到新的一段 */
+function draftGuard(next){
+  if(!draftHas()){next();return}
+  var d=draftRead(),n=d?d.text.length:0;
+  ask({title:'这段还没归档',
+    body:'草稿里还有 '+n+' 字'+(draftImgs().length?' 和待存的图':'')
+      +' 没定去处。<br>一个输入框只放得下一张草稿 —— 先把这段存好，才开得了下一段。',
+    pick:{options:['知识模块','点滴模块']},
+    ok:'存下来，再开新的',cancel:'先不弄',
+    onOk:function(mod){
+      saveSource(mod);
+      if(draftHas()){toast('上一段还没存上，先别开新的');return}
+      next();
+    }});
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='hidden')draftFlush();
+});
+window.addEventListener('pagehide',draftFlush);
 
 /* ===== 统一的提问弹窗（2026-11-01）=====
    以前三套混用：原生 prompt / confirm / 自建 mask。原生那两套有两个硬毛病：
@@ -2136,7 +2251,11 @@ function saveSource(mod){
     +(s.title?'<br><span style="font-size:11px;color:var(--ink3)">标题先替你填成「'
       +esc(s.title)+'」—— 打开那条记录就能改，也可以删除不填。</span>':'')
     +'</div>';
-  save();OPEN=null;renderAll();
+  var ok=save();
+  /* 归档成功才清草稿 —— 这是草稿唯一的出口。没存上就一个字都不清，
+     下次打开还能「接着写」，不会凭空出现第二张草稿。 */
+  if(ok)draftClear();
+  OPEN=null;renderAll();
   toast('存好了 · '+mod);
   if(mod==='知识模块')aiEnhance(s);   /* 点滴模块不送去抽知识点 */
   else if(mod==='点滴模块'&&S.dropAutoNew)dropAuto(s);   /* 新建自动认：由「新建即认」开关决定；关掉就把决定权交回用户（刷新全貌 / 打开单篇再认） */
@@ -2290,7 +2409,7 @@ function acceptImgFiles(fs){
   if(fs.length>left)toast('一次最多 6 张');
   fs.slice(0,left).forEach(function(f){
     if(!/^image\//.test(f.type))return;
-    compressImg(f,900,function(d){if(d){PEND_IMG.push(d);renderPendImg()}});
+    compressImg(f,900,function(d){if(d){PEND_IMG.push(d);renderPendImg();draftSyncImgs()}});
   });
 }
 function pickImgs(inp){
@@ -2317,7 +2436,7 @@ function renderPendImg(){
     +'<div style="font-size:11px;color:var(--ink3);margin-top:4px">'+PEND_IMG.length
     +' 张待存 · 点图片可去掉。存下后<b>它不会去看这些图</b>，只是跟着这条记录一起留下。</div>';
 }
-function dropPend(i){PEND_IMG.splice(i,1);renderPendImg()}
+function dropPend(i){PEND_IMG.splice(i,1);renderPendImg();draftSyncImgs()}
 function thumbRow(arr,note){
   if(!arr||!arr.length)return '';
   return '<div class="thumbs">'+arr.map(function(d){
@@ -3291,6 +3410,7 @@ function mdInsertLink(ta,s){
   var ins='[['+(s.id?'id:'+s.id:'')+'|'+(s.title||'')+']]';
   var nb=before.replace(/\[\[[^\]|]*$/,ins);
   ta.value=nb+after;var np=nb.length;ta.setSelectionRange(np,np);ta.focus();
+  if(ta.id==='inText')draftKick();
 }
 function srcDomainOf(sid){var s=srcOf(sid);return (s&&s.folder)||null}
 function moveTo(id,f){
@@ -5110,7 +5230,12 @@ var DEMO_TEXT='圆的定义：**平面上到定点距离等于定长的所有点
 +'**圆周率**是指圆的周长与直径的比值，是一个常数，约等于 3.14159。'
 +'**圆的周长公式**是 C = 2πr。我认为理解这个推导比记住公式更重要。'
 +'我估计用这个公式估算弯道长度，误差应该在 5% 以内。';
-function fillDemoText(){el('inText').value=DEMO_TEXT}
+function fillDemoText(){
+  draftGuard(function(){
+    el('inText').value=DEMO_TEXT;
+    draftPutText(DEMO_TEXT,true);draftStat();   /* 示例也立刻进草稿，别又变成没存的字 */
+  });
+}
 /* 🔴 载入例子以前会一声不吭把你存的全部冲掉（S 整个重写）。
    2026-11-01 的事故：客人自己存的那批就是这么没的。现在三条规矩：
    1. 覆盖前<b>先自动存一份备份</b>（只留最近一次，键名 wgs_v1_bak），随时能找回；
@@ -5785,7 +5910,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.5';
+var VER='V26.6';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
@@ -6715,6 +6840,7 @@ CURMOD=S.uiMod||'知识模块';      /* 上次看的是哪块，开机还在哪�
 bootTab(CURMOD);      /* 开机：大屏那一格自动放上最后存的一篇（不算回看，你还没看它） */
 (function(){var b=el('mdBar');if(b)b.innerHTML=mdBar('inText')})();   /* 输入框上面那一行工具 */
 renderAll();
+draftBoot();      /* 上次没写完的草稿，开机填回输入框 */
 /* Esc 关内页（弹窗开着时不抢） */
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
