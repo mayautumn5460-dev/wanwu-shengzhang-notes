@@ -1206,7 +1206,14 @@ function load(){try{var r=localStorage.getItem(KEY);if(r)S=JSON.parse(r)}catch(e
      不会连带把同一条链上别的篇、或同一句话别的地方一起封死。 */
   if(!S.fconf)S.fconf={};
 }
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify(S))}
+  catch(e){
+    /* V26.2：以前这里静默吞掉，空间满时新笔记根本没存进去却毫无提示。
+       现在明确报警，让人有机会先导出备份。 */
+    try{toast('存不下了：本地空间满，请先到「数据」导出备份')}catch(e2){}
+  }
+}
 
 /* ===== 统一的提问弹窗（2026-11-01）=====
    以前三套混用：原生 prompt / confirm / 自建 mask。原生那两套有两个硬毛病：
@@ -2071,6 +2078,7 @@ function saveSource(mod){
   if(!t){toast('先写点什么');return}
   var s={id:uid('s'),text:t,created_at:nowStamp(),state:'active',deleted_at:null,
     mod:mod,imgs:PEND_IMG.slice(0,6),title:autoTitle(t)};
+  s.imgs=packImgs(s.imgs,s);   /* V26.2：可用时转存大仓库，不可用则原样留在本体 */
   S.sources.push(s);
   /* 🔴 只有知识模块抽知识点。点滴模块是事件和感受，不是知识点 ——
      往里面抽知识点，等于把「今天有点难过」当成一条可考核的条目。 */
@@ -2099,6 +2107,127 @@ function saveSource(mod){
 }
 
 /* ============ 图片（压缩后存本地，不进任何识别流程） ============ */
+/* ===== V26.2 图片转存 IndexedDB（可选增强，失败自动退回原路径） =====
+   1) 默认关。只有 open 成功、预载成功，才把 IDB_OK 置 true。
+      file:// 双击 / 无痕 / 隐私窗口 / 不支持的浏览器 → 全程走原路径，
+      行为与 V26.1 一致，「双击即用」这条命根子不受影响。
+   2) s.imgs 元素由 dataURL 变成 'idb:<key>' 引用（仍是字符串），
+      所有只读 .length 的地方一律不用改。
+   3) IMGCACHE 让同步渲染照样拿得到图；启动预载一次，完成后重画。
+   4) 旧数据（data: 开头）原样显示，新旧混存无碍。
+   5) 导出把引用还原成 dataURL —— .json 自包含，换设备 / 回滚到老版本都能开。
+   6) 落库失败立刻把引用换回原图存回小仓库，绝不让图悬空。 */
+var IDB_OK=false,IDB=null,IMGCACHE={},IDB_NAME='wgs_imgs',IDB_STORE='imgs',IDB_PFX='idb:';
+function initImgDB(done){
+  done=done||function(){};
+  /* 🔴 file:// 双击打开时主动禁用：这个上下文的「源」是 null，
+     各家浏览器对本地文件的 IndexedDB 持久化行为不一致（可能写了下次就没）。
+     双击是这款产品的命根子，宁可继续用原来那套稳的，也不赌。 */
+  if(location.protocol==='file:'){done(false);return}
+  if(typeof indexedDB==='undefined'||!window.indexedDB){done(false);return}
+  var q;
+  try{q=indexedDB.open(IDB_NAME,1)}catch(e){done(false);return}
+  q.onupgradeneeded=function(){
+    try{var db=q.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE)}catch(e){}
+  };
+  q.onsuccess=function(){
+    IDB=q.result;
+    var fin=function(ok){
+      if(ok)IDB_OK=true;
+      done(ok);
+      if(ok&&typeof renderAll==='function'){try{renderAll()}catch(e){}}
+    };
+    try{
+      var tx=IDB.transaction(IDB_STORE,'readonly'),r=tx.objectStore(IDB_STORE).openCursor();
+      r.onsuccess=function(e){
+        var c=e.target.result;
+        if(c){IMGCACHE[c.key]=c.value;c.continue()}
+        else fin(true);
+      };
+      r.onerror=function(){fin(false)};
+      tx.onerror=function(){fin(false)};
+    }catch(e){fin(false)}
+  };
+  q.onerror=function(){done(false)};
+  q.onblocked=function(){done(false)};
+}
+function idbPut(key,val,cb){
+  cb=cb||function(){};
+  if(!IDB_OK){cb(false);return}
+  var once=false;
+  var fin=function(ok){if(once)return;once=true;cb(ok)};   /* 失败时 onerror/onabort 可能都来，只认第一次 */
+  try{
+    var tx=IDB.transaction(IDB_STORE,'readwrite');
+    tx.objectStore(IDB_STORE).put(val,key);
+    tx.oncomplete=function(){fin(true)};
+    tx.onerror=function(){fin(false)};
+    tx.onabort=function(){fin(false)};
+  }catch(e){fin(false)}
+}
+/* 显示用：引用 → 图片本体；老数据 / 降级数据原样返回 */
+function imgSrc(v){
+  v=String(v||'');
+  if(v.indexOf(IDB_PFX)!==0)return v;
+  return IMGCACHE[v.slice(IDB_PFX.length)]||'';
+}
+/* 存记录用：图片本体 → 引用。写入失败自动退回本体，图不丢 */
+function packImgs(arr,owner){
+  if(!IDB_OK||!arr||!arr.length)return arr||[];
+  return arr.map(function(d,idx){
+    d=String(d||'');
+    if(d.indexOf('data:')!==0)return d;
+    var k=uid('i');IMGCACHE[k]=d;
+    (function(kk,dd,ix){
+      idbPut(kk,dd,function(ok){
+        if(ok)return;
+        if(owner&&owner.imgs&&owner.imgs[ix]===IDB_PFX+kk){
+          owner.imgs[ix]=dd;
+          try{save()}catch(e){}
+        }
+      });
+    })(k,d,idx);
+    return IDB_PFX+k;
+  });
+}
+/* 导出用：深拷贝一份，引用还原成图片本体，得到自包含 .json */
+function hydrateImgs(cb){
+  var o;
+  try{o=JSON.parse(JSON.stringify(S))}catch(e){cb(null);return}
+  if(!IDB_OK){cb(o);return}
+  (o.sources||[]).forEach(function(s){
+    if(!s.imgs)return;
+    s.imgs=s.imgs.map(function(v){
+      if(String(v||'').indexOf(IDB_PFX)!==0)return v;
+      return IMGCACHE[String(v).slice(IDB_PFX.length)]||v;
+    });
+  });
+  cb(o);
+}
+/* 导入用：把 .json 里的图片本体写进大仓库，换成引用 */
+function absorbImgs(o,cb){
+  if(!IDB_OK){cb(o);return}
+  var jobs=[];
+  (o.sources||[]).forEach(function(s){
+    if(!s.imgs)return;
+    s.imgs=s.imgs.map(function(v,idx){
+      var d=String(v||'');
+      if(d.indexOf('data:')!==0)return v;
+      var k=uid('i');IMGCACHE[k]=d;jobs.push({k:k,d:d,s:s,idx:idx});return IDB_PFX+k;
+    });
+  });
+  if(!jobs.length){cb(o);return}
+  var left=jobs.length,finished=false;
+  var finish=function(){if(finished)return;finished=true;cb(o)};
+  /* 兜底：事务万一卡住，最多等 2 秒也要让导入落地，绝不假死 */
+  setTimeout(finish,2000);
+  jobs.forEach(function(j){
+    idbPut(j.k,j.d,function(ok){
+      if(finished)return;
+      if(!ok)j.s.imgs[j.idx]=j.d;   /* 写不进就保留原图，不悬空 */
+      if(--left===0)finish();
+    });
+  });
+}
 var PEND_IMG=[];
 function compressImg(file,maxSide,cb){
   var fr=new FileReader();
@@ -2156,7 +2285,11 @@ function dropPend(i){PEND_IMG.splice(i,1);renderPendImg()}
 function thumbRow(arr,note){
   if(!arr||!arr.length)return '';
   return '<div class="thumbs">'+arr.map(function(d){
-    return '<img src="'+d+'" onclick="window.open(this.src)">';}).join('')+'</div>'
+    var u=imgSrc(d);
+    /* 引用还没从大仓库预载回来时，先给个占位，不显示破图；预载完会重画 */
+    if(!u)return '<span class="thumbs" style="display:inline-block;width:54px;height:54px;'
+      +'border-radius:6px;background:var(--line,rgba(0,0,0,.06))"></span>';
+    return '<img src="'+u+'" onclick="window.open(this.src)">';}).join('')+'</div>'
     +(note?'<div style="font-size:11px;color:var(--ink3);margin-top:3px">'+note+'</div>':'');
 }
 
@@ -5092,10 +5225,15 @@ function askImportGuide(){
     onOk:function(){el('inJson').click()}});
 }
 function doExport(){
-  var blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);a.download='万物生长_'+today()+'.json';a.click();
-  toast('已导出，你可以自己复算');
+  /* V26.2：把 idb: 引用还原成图片本体再导出。
+     导出的 .json 永远自包含 —— 换设备、或回滚到没有大仓库的老版本，照样打得开。 */
+  hydrateImgs(function(o){
+    if(!o){toast('导出失败：数据读不出来');return}
+    var blob=new Blob([JSON.stringify(o,null,2)],{type:'application/json'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);a.download='万物生长_'+today()+'.json';a.click();
+    toast('已导出，你可以自己复算');
+  });
 }
 function doImport(inp){
   var f=inp.files&&inp.files[0];if(!f)return;
@@ -5109,8 +5247,11 @@ function doImport(inp){
         body:'本机现在有 '+cnt+' 条记录，导入后<b>被这份文件整个替掉</b>。<br>'
           +'<span style="font-size:11px;color:#5F5E5A">覆盖前会<b>先自动存一份备份</b>'
           +' —— 万一导错了，去「数据」里点「找回」。</span>',
-        onOk:function(){saveBak();S=o;save();renderAll();
-          toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');inp.value=''},
+        onOk:function(){saveBak();
+          absorbImgs(o,function(oo){
+            S=oo;save();renderAll();
+            toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');inp.value='';
+          });},
         onCancel:function(){inp.value=''}});
     }catch(e){
       ask({title:'这个文件读不出来',only:1,ok:'知道了',body:esc(String(e.message||''))});
@@ -5294,12 +5435,15 @@ function openStore(){
   el('storeBox').innerHTML=
    '<div class="sec"><b>存在哪</b>'
    +'<div style="font-size:12px;color:#5F5E5A;line-height:1.9;margin-top:4px">'
-   +'在你这台电脑的<b>浏览器本地存储</b>里（键名 <span class="num">'+KEY+'</span>）。<br>'
+   +'文字、知识点、河历存在<b>浏览器本地存储</b>里（键名 <span class="num">'+KEY+'</span>）。<br>'
+   +(IDB_OK
+      ?'图片单独存在浏览器自带的<b>大仓库（IndexedDB）</b>里，不和文字抢那 5 MB。<br>'
+      :'图片和文字存在同一处（当前环境不支持大仓库，已自动退回原来的方式）。<br>')
    +'它<b>不上传任何服务器</b> —— 这个页面没有联网，也没有后端。<br>'
    +'数据写在浏览器的用户数据目录里，<b>关机、重启、断网都不会丢</b>。</div></div>'
    +'<div class="sec"><b>现在有多少</b>'
    +'<div style="font-size:12px;color:#5F5E5A;line-height:1.9;margin-top:4px">'
-   +'占用 <span class="num">'+fmtBytes(i.bytes)+'</span> · 浏览器给单个页面的上限一般是 5 MB（已用 '+i.pct+'%）<br>'
+   +'文字占用 <span class="num">'+fmtBytes(i.bytes)+'</span> · 浏览器给单个页面的上限一般是 5 MB（已用 '+i.pct+'%）<br>'
    +'记录 <span class="num">'+S.sources.length+'</span> 条 · 知识点 <span class="num">'+S.marks.length
    +'</span> 条 · 图片 <span class="num">'+i.imgs+'</span> 张 · 河历 <span class="num">'+S.events.length+'</span> 条<br>'
    +'最近一次写入：<span class="num">'+i.last+'</span></div></div>'
@@ -5515,13 +5659,16 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.1';
+var VER='V26.2';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
 })();
 
 load();loadAI();
+/* V26.2：异步探测大仓库。可用 → 预载图片并补画一次；不可用 → 静默走原路径。
+   放在 load() 之后、首屏 renderAll() 之前也不影响：本函数只在成功时自行重画。 */
+try{initImgDB()}catch(e){}
 /* 老记录没有标题字段 —— 一次性补上（只补这一次，之后就是用户自己的了） */
 (function(){
   var need=S.sources.filter(function(s){return s.title===undefined});

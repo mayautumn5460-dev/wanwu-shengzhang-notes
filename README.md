@@ -5,6 +5,7 @@
 > 📘 English version: [README_EN.md](./README_EN.md)
 > 📦 开源仓库：[github.com/mayautumn5460-dev/wanwu-shengzhang-notes](https://github.com/mayautumn5460-dev/wanwu-shengzhang-notes)
 > 🐛 反馈 / 建议：[提 Issue](https://github.com/mayautumn5460-dev/wanwu-shengzhang-notes/issues)
+> 🗂 版本记录：[CHANGELOG.md](./CHANGELOG.md)
 
 ---
 

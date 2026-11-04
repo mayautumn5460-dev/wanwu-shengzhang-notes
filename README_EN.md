@@ -3,6 +3,7 @@
 > A note-taking system where AI participates — but doesn't decide for you.
 > The only original intent: **see the growth, see the road traveled.**
 > 📘 中文版: [README.md](./README.md)
+> 🗂 Version log: [CHANGELOG.md](./CHANGELOG.md)
 
 ---
 
