@@ -1046,6 +1046,32 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
 <script>
 /* ============ 基础 ============ */
 var KEY='wgs_v1';
+/* V26.8：「只导新增」的搬运进度。刻意不放在 S 里 ——
+   这是这台设备自己的进度，不是笔记内容：整机导入换掉 S 时不该把它冲掉，
+   完整备份也不该把它带给别人。 */
+var EKEY='wgs_exported_v1';
+function expState(){
+  try{var o=JSON.parse(localStorage.getItem(EKEY)||'{}');
+    return (o&&typeof o==='object'&&o.ids&&typeof o.ids==='object')?o:{ids:{}}
+  }catch(e){return {ids:{}}}
+}
+function saveExpState(o){
+  try{localStorage.setItem(EKEY,JSON.stringify(o));return true}
+  catch(e){toast('进度没存住 · 下次这几条还会再出现');return false}
+}
+/* 一条记录的变更签名：正文 / 标题 / AI 结果任一变了，就该重新带走一次。
+   刻意不比较时间戳大小 —— 手机改时区、系统时间被改、导入带旧戳的日记，都会让时间判错。 */
+function srcSig(s){return [s.edited_at||'',s.title_at||'',(s._ai&&s._ai.at)||''].join('|')}
+function incAlive(s){return !!(s&&s.id&&s.state!=='gone'&&s.state!=='deleted')}
+function pendingInc(){
+  var st=expState(),out=[];
+  (S.sources||[]).forEach(function(s){
+    if(!incAlive(s))return;
+    var r=st.ids[s.id];
+    if(!r||r.sig!==srcSig(s))out.push(s);
+  });
+  return out;
+}
 var APP_V='0.4';
 var S={v:3,sources:[],marks:[],claims:[],reviews:[],events:[],chronicle:[],quiz:[],
   folders:[],folderAka:{},mute:[],alias:[],rel2:[],ledPos:{},dropAutoNew:false};   /* mute：你删掉的东西，以后不再挑回来（V18） · dropAutoNew：「新建即认」开关，默认关 */
@@ -5462,18 +5488,29 @@ function buildDemo(){
   save();renderAll();toast('例子已载入 · 点滴模块里 20 条，切过去看');
 }
 function askExportGuide(){
-  ask({title:'导出备份',ok:'导出 .json',
-    body:'把当前这台设备上的<b>全部数据</b>导出成一份完整备份。<br>'
-      +'点「导出」后会照旧尝试下载文件，<b>同时弹出一个能直接复制全文的窗口</b> —— '
+  var n=pendingInc().length,all=(S.sources||[]).filter(incAlive).length;
+  ask({title:'导出备份',ok:'导出完整 .json',
+    body:'<b>完整备份</b>：把这台设备上的<b>全部数据</b>打成一个包，换机 / 回滚用。<br>'
+      +'照旧尝试下载文件，<b>同时弹出能直接复制全文的窗口</b> —— '
       +'微信里下载经常被拦，复制那条路一定能用。<br>'
-      +'<span style="font-size:11px;color:#5F5E5A">里面只有你的内容，不含任何账号或联网信息。</span>',
+      +'<div style="margin-top:10px;padding-top:9px;border-top:1px solid #ddd">'
+      +'<b>只导新增（'+n+' 条待带走）</b><br>'
+      +'<span style="font-size:11px;color:#5F5E5A">手机上的记录搬到电脑时用这个：只打包上次之后'
+      +'新增或改过的记录，电脑端会自动<b>并入</b>、不会覆盖。<br>'
+      +'只含记录本身；分类、别称、关系不跟着走，删除也不跟着走。</span><br>'
+      +'<label style="font-size:12px"><input type="checkbox" id="incImgs"> 连图片一起'
+      +'（一张图就可能超出微信字数上限）</label><br>'
+      +'<button class="g" onclick="doExportIncFromGuide()">只导新增（'+n+' 条）</button> '
+      +'<button class="g" onclick="markAllExported()">现有 '+all+' 条都已在电脑上</button>'
+      +'</div><span style="font-size:11px;color:#5F5E5A">里面只有你的内容，不含任何账号或联网信息。</span>',
     onOk:doExport});
 }
 function askImportGuide(){
   ask({title:'导入备份',ok:'选择文件导入',
     body:'读入一个之前「导出」生成的 <b>.json 文件</b>，用它<b>替换</b>当前设备上的全部数据。<br>'
       +'导入前会<b>先自动存一份当前数据的备份</b>，万一导错了可去「数据」里找回。<br>'
-      +'<span style="font-size:11px;color:#5F5E5A">注意：这是<b>替换</b>不是合并 —— 选中的文件会整个盖掉现在的内容。</span>'
+      +'<span style="font-size:11px;color:#5F5E5A">注意：完整备份是<b>替换</b>不是合并。<br>'
+      +'如果粘进来的是「只导新增」生成的包，会自动<b>按 id 并入</b>，本机原有的一条都不动。</span>'
       +'<div style="margin-top:10px;padding-top:9px;border-top:1px solid #ddd">'
       +'<b>手机上复制过来的？</b>不用存成文件，直接把全文粘进下面这个框：'
       +'<textarea id="impTxt" placeholder="把导出的 .json 全文粘在这里" '
@@ -5485,28 +5522,97 @@ function doExport(){
   /* V26.2：把 idb: 引用还原成图片本体再导出。
      导出的 .json 永远自包含 —— 换设备、或回滚到没有大仓库的老版本，照样打得开。
      V26.7：下载之外再开一条「直接摊开全文」的出口。微信内置浏览器会静默忽略
-     <a download>，旧版那句「已导出」是假的 —— 现在不再无条件报成功。 */
+     <a download>，旧版那句「已导出」是假的 —— 现在不再无条件报成功。
+     V26.8：完整备份不推进增量进度 —— 换机备份和「搬到电脑」是两条线，互不干扰。 */
   hydrateImgs(function(o){
     if(!o){toast('导出失败：数据读不出来');return}
     var txt=JSON.stringify(o,null,2);
     var blob=new Blob([txt],{type:'application/json'});
     var a=document.createElement('a');
     a.href=URL.createObjectURL(blob);a.download='万物生长_'+today()+'.json';a.click();
-    showExportText(txt);
+    INCPEND=null;
+    showExportText(txt,{});
   });
+}
+/* ============ V26.8：只导新增 ============
+   判定靠「已带走的 id + 变更签名」，不靠时间水位线：
+   手机改时区、系统时间被改、导入带旧戳的日记，都会让时间判错。
+   弹窗出现绝不推进进度 —— 网页拿不到「微信发出去了 / 电脑收到了」的回执，
+   只有用户亲手点「这几条我拿走了」才记下；没点的下次照旧出现。
+   重复带走也无害：电脑端按 id 去重，第二次并同一份新增 0 条。 */
+var INCPEND=null;
+function doExportIncFromGuide(){
+  var c=el('incImgs'),withImgs=!!(c&&c.checked);
+  qClose();
+  doExportInc(withImgs);
+}
+function doExportInc(withImgs){
+  var list=pendingInc();
+  if(!list.length){toast('没有要带走的新记录');return}
+  var pack={_wgs_inc:1,_at:nowStamp(),_count:list.length,sources:[]};
+  list.forEach(function(s){
+    var c;try{c=JSON.parse(JSON.stringify(s))}catch(e){return}
+    if(!withImgs)c.imgs=[];
+    else if(c.imgs&&c.imgs.length){
+      c.imgs=c.imgs.map(function(v){
+        var d=String(v||'');
+        return d.indexOf(IDB_PFX)===0?(IMGCACHE[d.slice(IDB_PFX.length)]||v):v;
+      });
+    }
+    pack.sources.push(c);
+  });
+  INCPEND=list;
+  showExportText(JSON.stringify(pack,null,2),{inc:1,list:list,withImgs:withImgs});
+}
+function markAllExported(){
+  var all=(S.sources||[]).filter(incAlive);
+  if(!all.length){toast('现在还没有记录');return}
+  qClose();
+  ask({title:'把现有记录标为已带走',danger:1,ok:'确认标记',
+    body:'会把这 <b>'+all.length+' 条</b>全记作「已经搬到电脑了」，'
+      +'以后「只导新增」<b>不会再带它们</b>。<br>'
+      +'<span style="color:#b00">只有这些记录确实已经安全到电脑上了，才点这个。</span><br>'
+      +'<span style="font-size:11px;color:#5F5E5A">不改动任何记录，只改这台设备的搬运进度；'
+      +'随时还能再导一次完整备份。</span>',
+    onOk:function(){
+      var st=expState(),at=nowStamp();
+      all.forEach(function(s){st.ids[s.id]={at:at,sig:srcSig(s)}});
+      if(saveExpState(st))toast('已标记 '+all.length+' 条 · 之后只带新增的');
+    }});
+}
+function confirmTaken(){
+  var list=INCPEND||[];
+  if(!list.length){toast('这次没有要记下的记录');return}
+  var st=expState(),at=nowStamp();
+  list.forEach(function(s){st.ids[s.id]={at:at,sig:srcSig(s)}});
+  if(!saveExpState(st))return;   /* 写失败不假成功 —— 下次照旧出现，不会静默漏 */
+  var n=list.length;INCPEND=null;qClose();
+  toast('记下 '+n+' 条 · 下次「只导新增」不再出现');
 }
 /* V26.7：不依赖任何下载权限的出口 —— 全文摊在页面上，复制 / 长按都行。
    微信里 WKWebView 不给网页保存文件的接口，安卓也常把下载吞进私有缓存，
-   但「页面上一段可选中的文字」在哪都能拿走。 */
-function showExportText(txt){
-  ask({title:'备份内容已生成',only:1,ok:'关闭',
-    body:'<div style="font-size:12px;line-height:1.7">'
-      +'文件名 <b>万物生长_'+today()+'.json</b> · 共 '+txt.length+' 字符。<br>'
+   但「页面上一段可选中的文字」在哪都能拿走。
+   V26.8：增量包多一个「这几条我拿走了」按钮，并列出这次到底是哪几条。 */
+function showExportText(txt,opt){
+  opt=opt||{};
+  var inc=!!opt.inc,list=opt.list||[];
+  var head=inc
+    ? ('增量包 · <b>'+list.length+' 条</b> · 共 '+txt.length+' 字符<br>'
+      +'这次带走的是：'+esc(list.slice(0,8).map(function(s){
+        return s.title||String(s.text||'').slice(0,10)}).join('、'))
+      +(list.length>8?' …':'')+'<br>'
+      +'<span style="font-size:11px;color:#5F5E5A">只含记录本身；分类、别称、关系不跟着走。'
+      +(opt.withImgs?'':'本次不含图片。')
+      +'<br><b style="color:#b00">确认内容已经发到电脑了，再点「这几条我拿走了」。</b></span>')
+    : ('文件名 <b>万物生长_'+today()+'.json</b> · 共 '+txt.length+' 字符。<br>'
       +'已经尝试下载，但<b>微信里经常不会真的生成文件</b>。最稳的是点「复制全部」'
       +' → 发到微信「文件传输助手」 → 在电脑端用「粘贴内容导入」。<br>'
-      +'<span style="font-size:11px;color:#5F5E5A">按钮没反应时，长按文本框手动全选复制也一样。</span></div>'
+      +'<span style="font-size:11px;color:#5F5E5A">按钮没反应时，长按文本框手动全选复制也一样。</span>');
+  ask({title:inc?'只导新增 · 复制给电脑':'备份内容已生成',only:1,ok:'关闭',
+    body:'<div style="font-size:12px;line-height:1.7">'+head+'</div>'
       +'<textarea id="expTxt" style="width:100%;height:120px;margin:8px 0;font-size:12px;box-sizing:border-box"></textarea>'
-      +'<button class="p" onclick="copyExportText()">复制全部</button>'});
+      +'<button class="p" onclick="copyExportText()">复制全部</button>'
+      +(inc?' <button class="g" onclick="confirmTaken()">这几条我拿走了</button>':'')});
   var t=el('expTxt');if(t)t.value=txt;
 }
 function copyExportText(){
@@ -5529,17 +5635,79 @@ function importFromPasted(){
   qClose();
   applyImport(o,function(){});
 }
+/* V26.8：按包类型分流。增量包走「并入」，完整备份仍走「覆盖」；
+   两端短暂不同版时，小包误当完整备份导入也不会静默毁数据 —— 会硬拦一次。 */
 function applyImport(o,done){
-  var cnt=S.sources.length;
-  ask({title:'导入会覆盖本机现在的数据',danger:1,ok:'覆盖导入',
-    body:'本机现在有 '+cnt+' 条记录，导入后<b>被这份文件整个替掉</b>。<br>'
+  if(o&&o._wgs_inc)return applyMerge(o,done);
+  var cnt=S.sources.length,inc=(o.sources||[]).length;
+  var risky=(cnt>=10&&inc<cnt/2);
+  ask({title:risky?'⚠ 这份包比本机少很多':'导入会覆盖本机现在的数据',danger:1,ok:'覆盖导入',
+    body:'本机现在有 <b>'+cnt+'</b> 条记录，这份文件有 <b>'+inc+'</b> 条，'
+      +'导入后<b>被这份文件整个替掉</b>。<br>'
+      +(risky?'<span style="color:#b00"><b>这看着像把增量包当成完整备份导进来了</b>'
+        +' —— 一覆盖，本机那 '+(cnt-inc)+' 条会全没。<br>'
+        +'若你是想把手机的新记录并进来，请改用「只导新增」生成的包。</span><br>':'')
       +'<span style="font-size:11px;color:#5F5E5A">覆盖前会<b>先自动存一份备份</b>'
       +' —— 万一导错了，去「数据」里点「找回」。</span>',
-    onOk:function(){saveBak();
-      absorbImgs(o,function(oo){
-        S=oo;save();renderAll();
-        toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');if(done)done();
-      });},
+    onOk:function(){
+      var go=function(){saveBak();
+        absorbImgs(o,function(oo){
+          S=oo;if(!save()){toast('导入没存住 · 本机数据未改动');if(done)done();return}
+          renderAll();
+          toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');if(done)done();
+        });};
+      if(risky){
+        ask({title:'再确认一次',danger:1,ok:'我确定要覆盖',
+          body:'你要用 <b>'+inc+' 条</b>换掉本机 <b>'+cnt+' 条</b>。<br>'
+            +'<span style="color:#b00">这一步之后只能靠备份找回。</span>',
+          onOk:go,onCancel:function(){if(done)done()}});
+      }else go();
+    },
+    onCancel:function(){if(done)done()}});
+}
+function srcNewer(a,b){
+  var ka=String(a.edited_at||a.title_at||(a._ai&&a._ai.at)||a.created_at||'');
+  var kb=String(b.edited_at||b.title_at||(b._ai&&b._ai.at)||b.created_at||'');
+  return ka>kb;
+}
+/* V26.8：增量包 = 只补记录，别的数组一律不碰。
+   buildDemo() 的「并进去」骨架里 marks/events/reviews 是直接 concat 的，
+   连导两次会翻倍 —— 这里刻意不搬那些，只按 id 追加 / 更新 sources。 */
+function applyMerge(o,done){
+  var inc=(o.sources||[]).filter(function(s){return s&&s.id});
+  if(!inc.length){toast('这份增量包里没有记录');if(done)done();return}
+  var have={};S.sources.forEach(function(s){if(s&&s.id)have[s.id]=s});
+  var add=[],upd=[];
+  inc.forEach(function(s){
+    var local=have[s.id];
+    if(!local)add.push(s);
+    else if(srcNewer(s,local))upd.push(s);
+  });
+  if(!add.length&&!upd.length){
+    toast('这 '+inc.length+' 条本机都有了 · 没有新增');if(done)done();return;
+  }
+  var cnt=S.sources.length;
+  ask({title:'并入手机的新记录',ok:'并入 '+(add.length+upd.length)+' 条',
+    body:'新增 <b>'+add.length+'</b> 条'
+      +(upd.length?'，更新 <b>'+upd.length+'</b> 条（本机有同一条，对方改过）':'')
+      +'。<br>本机现有 <b>'+cnt+'</b> 条<b>一条都不动</b>，只按 id 补进去。<br>'
+      +'<span style="font-size:11px;color:#5F5E5A">并入前会先自动存一份备份；'
+      +'重复并同一份不会翻倍。</span>',
+    onOk:function(){
+      saveBak();
+      var payload={sources:JSON.parse(JSON.stringify(add.concat(upd)))};
+      absorbImgs(payload,function(oo){
+        var byId={};(oo.sources||[]).forEach(function(s){byId[s.id]=s});
+        var replaced=0;
+        S.sources=S.sources.map(function(s){
+          if(byId[s.id]){replaced++;return byId[s.id]}return s});
+        Object.keys(byId).forEach(function(id){if(!have[id])S.sources.push(byId[id])});
+        if(!save()){toast('并入没存住 · 本机数据未改动');if(done)done();return}
+        renderAll();
+        toast('并入完成 · 新增 '+add.length+' 条、更新 '+replaced+' 条');
+        if(done)done();
+      });
+    },
     onCancel:function(){if(done)done()}});
 }
 function doImport(inp){
@@ -5956,7 +6124,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.7';
+var VER='V26.8';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
