@@ -31,7 +31,7 @@
 | V26.4 / `v1.0.3` | 2026-11-04 | AI 厂商预设补齐、关闭思考开关、点滴长文上限 | index.html, sw.js, CHANGELOG.md | ✅ GitHub + Release + 线上 |
 | V26.5 / `v1.0.4` | 2026-11-04 | 点格浮卡、只读要素菜单、AI 报告分层、攀附须接通 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
 | V26.6 / `v1.0.5` | 2026-11-05 | 单实例草稿：打字自动存、归档才是唯一出口 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
-| V26.7 / `v1.0.6` | 2026-11-06 | 修手机微信里「导出成功却拿不到文件」：加复制全文 + 粘贴导入 | index.html, sw.js, CHANGELOG.md | 🔄 发布中 |
+| V26.7 / `v1.0.6` | 2026-11-06 | 修手机微信里「导出成功却拿不到文件」：加复制全文 + 粘贴导入 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上三处齐全（tag `v1.0.6`；本次未附 Release 附件） |
 
 ### V26.7 / `v1.0.6`（2026-11-06）
 
