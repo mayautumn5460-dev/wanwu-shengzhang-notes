@@ -34,6 +34,27 @@
 | V26.7 / `v1.0.6` | 2026-11-06 | 修手机微信里「导出成功却拿不到文件」：加复制全文 + 粘贴导入 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上三处齐全（tag `v1.0.6`；本次未附 Release 附件） |
 | V26.8 / `v1.0.7` | 2026-11-06 | 只导新增 + 按 id 并入：手机 200 篇也能搬进电脑，且不会覆盖主库 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
 | V26.9 / `v1.0.8` | 2026-11-06 | 统一「后写的在上」：修导入两篇后早写的压在上层 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
+| V26.10 / `v1.0.9` | 2026-11-07 | 要素名归一：Hy3 / hy3 合成一列，土壤可登记普通词，旧花表态不丢 | index.html, sw.js, CHANGELOG.md | ✅ 本地 + GitHub + 线上（三处齐全） |
+
+### V26.10 / `v1.0.9`（2026-11-07）
+
+导入的两篇点滴里，AI 把同一个词分别抽成 `Hy3` 和 `hy3`；画布全靠字符串精确相等（`ORDER.push(nm)` / `ORDER.indexOf(nm)` / `ents.indexOf`），于是一词两列。用户想说「这俩是同一个」，但「我的土壤」只有「＋ 加一个人」，且 `kind='person'` 会进人物关系图；V26.5 起右键要素卡已改成只读，没有归并入口。侧栏说明书仍写着「在图上把『种豆专家』归到『李甲乙』的那一刻，它自己就长出来了」，与实现早已不符。
+
+**方案：只做地基，不在画布加写动作。**
+
+1. 新增 `kind='term'`，`LEDKIND/LEDORD/LEDW/LEDW1/LEDW2` 五张映射表同步补齐（否则显示 `undefined`、排序 `NaN`）；土壤加「＋ 加一个要素」按钮 `ledAddTerm()`。`ledGraph()` / `drawLedGraph()` 只过滤 `person`，term 天然不进人物关系图，原「＋ 加一个人」不动。
+2. 新增归一函数块：`ENTVARS` / `CANONNAME` / `entKey` / `canonName` / `canonReset` / `canonEnt` / `canonVars` / `entUniq` / `migrateFconf`。
+   - **机械归一（自动）**：NFKC 全半角折叠 → 去全部空白 → 大小写折叠。除此之外不做模糊匹配、编辑距离、同义词推断。
+   - **语义归一（必须显式登记）**：`S.alias` 条目的 `canon + names` 构成映射表，命中才归到 canon；系统不自行猜「种豆专家 = 李甲乙」。
+   - **显示名以土壤 canon 为稳定锚点**；无登记时取本批第一次见到的拼法，并由 `CANONNAME[key]` 固定，保证同 key 恒定返回同一字符串（不再受导入顺序影响）。
+3. **单一入口**：`feed()` 开头 `canonReset()`，`ents` / `oth` 全部过 `canonEnt()` + `entUniq()`。下面 `ORDER` / `chainPts()` / `cells()` / 攀附须的精确相等比较自动归一，逐处零改动。副作用：写法不同的 `others` 现在也能对上列了（旧实现被 `indexOf<0` 直接丢掉）。
+4. **花状态迁移（唯一会真丢东西的地方）**：`fkeyOf()` 用 `chainName(id)` 即列名做 key，列名一改，`S.fconf` 旧 key 全部失配，确认过 / 撤掉过的花会静默回到「未表态」。`migrateFconf()` 做幂等重映射 `srcId|oldName → srcId|canonName(...)`，在 `load()` 与 `feed()` 末尾各调一次（后者 `CANONNAME` 已填满，结果与 `fkeyOf()` 逐字对齐）；多个旧名归到同一新名时 `0`（撤掉）优先，保守不替用户恢复。纯内存，不主动写回。
+5. **透明性**：`colInfo()` 返回 `vars`，右键只读要素卡与点格浮卡都显示「这一列还合了：…」；卡片仍只读，不加归并 / 重命名动作。
+6. **文案对齐**：侧栏说明书改为「自己填 + 自动认写法差异」；`aiEnhance()` / `aiDropEnhance()` 提示词「这些人的别称」改为「这些名字的别称」。
+
+**边界 / 不做什么**：不回写 `S.sources`、不改 `_drop` / `_ai`、不重跑模型、不动原文，归一只活在画布读取层；不做自动同步、不加画布写动作、不做语义猜测。已知边界：大小写折叠会合并 `AI`/`ai`、`IT`/`it`、`May`/`may` 等英文里可能真不同的词（中文不受影响），目前只能靠在土壤里登记不同 canon 拆开，尚无显式排除表。V26.8 增量导出不带 `S.alias`，手机上登记的归一不会跟到电脑，完整备份才带。`KEY='wgs_v1'` 未动，老数据一条不少、无需重新导入。
+
+缓存 `wgs-v10` → `wgs-v11`。新增专项测试 `prototypes/_archive/test_v2610_canon.js`；维护 `test_v265_celltip.js`（`others` 归一断言 + `canonVars` mock）、`test_v269_order.js`（版本断言改为「不低于 V26.9」，避免每次升级误报）。
 
 ### V26.9 / `v1.0.8`（2026-11-06）
 
