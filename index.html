@@ -5463,8 +5463,9 @@ function buildDemo(){
 }
 function askExportGuide(){
   ask({title:'导出备份',ok:'导出 .json',
-    body:'把当前这台设备上的<b>全部数据</b>导出成一个 <b>.json 文件</b>（一份完整备份）。<br>'
-      +'文件存到你自己的下载目录，可拷到硬盘 / 网盘，或换台设备后再「导入」回来。<br>'
+    body:'把当前这台设备上的<b>全部数据</b>导出成一份完整备份。<br>'
+      +'点「导出」后会照旧尝试下载文件，<b>同时弹出一个能直接复制全文的窗口</b> —— '
+      +'微信里下载经常被拦，复制那条路一定能用。<br>'
       +'<span style="font-size:11px;color:#5F5E5A">里面只有你的内容，不含任何账号或联网信息。</span>',
     onOk:doExport});
 }
@@ -5472,19 +5473,74 @@ function askImportGuide(){
   ask({title:'导入备份',ok:'选择文件导入',
     body:'读入一个之前「导出」生成的 <b>.json 文件</b>，用它<b>替换</b>当前设备上的全部数据。<br>'
       +'导入前会<b>先自动存一份当前数据的备份</b>，万一导错了可去「数据」里找回。<br>'
-      +'<span style="font-size:11px;color:#5F5E5A">注意：这是<b>替换</b>不是合并 —— 选中的文件会整个盖掉现在的内容。</span>',
+      +'<span style="font-size:11px;color:#5F5E5A">注意：这是<b>替换</b>不是合并 —— 选中的文件会整个盖掉现在的内容。</span>'
+      +'<div style="margin-top:10px;padding-top:9px;border-top:1px solid #ddd">'
+      +'<b>手机上复制过来的？</b>不用存成文件，直接把全文粘进下面这个框：'
+      +'<textarea id="impTxt" placeholder="把导出的 .json 全文粘在这里" '
+      +'style="width:100%;height:88px;margin:6px 0;font-size:12px;box-sizing:border-box"></textarea>'
+      +'<button class="p" onclick="importFromPasted()">粘贴内容导入</button></div>',
     onOk:function(){el('inJson').click()}});
 }
 function doExport(){
   /* V26.2：把 idb: 引用还原成图片本体再导出。
-     导出的 .json 永远自包含 —— 换设备、或回滚到没有大仓库的老版本，照样打得开。 */
+     导出的 .json 永远自包含 —— 换设备、或回滚到没有大仓库的老版本，照样打得开。
+     V26.7：下载之外再开一条「直接摊开全文」的出口。微信内置浏览器会静默忽略
+     <a download>，旧版那句「已导出」是假的 —— 现在不再无条件报成功。 */
   hydrateImgs(function(o){
     if(!o){toast('导出失败：数据读不出来');return}
-    var blob=new Blob([JSON.stringify(o,null,2)],{type:'application/json'});
+    var txt=JSON.stringify(o,null,2);
+    var blob=new Blob([txt],{type:'application/json'});
     var a=document.createElement('a');
     a.href=URL.createObjectURL(blob);a.download='万物生长_'+today()+'.json';a.click();
-    toast('已导出，你可以自己复算');
+    showExportText(txt);
   });
+}
+/* V26.7：不依赖任何下载权限的出口 —— 全文摊在页面上，复制 / 长按都行。
+   微信里 WKWebView 不给网页保存文件的接口，安卓也常把下载吞进私有缓存，
+   但「页面上一段可选中的文字」在哪都能拿走。 */
+function showExportText(txt){
+  ask({title:'备份内容已生成',only:1,ok:'关闭',
+    body:'<div style="font-size:12px;line-height:1.7">'
+      +'文件名 <b>万物生长_'+today()+'.json</b> · 共 '+txt.length+' 字符。<br>'
+      +'已经尝试下载，但<b>微信里经常不会真的生成文件</b>。最稳的是点「复制全部」'
+      +' → 发到微信「文件传输助手」 → 在电脑端用「粘贴内容导入」。<br>'
+      +'<span style="font-size:11px;color:#5F5E5A">按钮没反应时，长按文本框手动全选复制也一样。</span></div>'
+      +'<textarea id="expTxt" style="width:100%;height:120px;margin:8px 0;font-size:12px;box-sizing:border-box"></textarea>'
+      +'<button class="p" onclick="copyExportText()">复制全部</button>'});
+  var t=el('expTxt');if(t)t.value=txt;
+}
+function copyExportText(){
+  var t=el('expTxt');if(!t)return;
+  t.focus();try{t.setSelectionRange(0,t.value.length)}catch(e){}
+  var ok=false;try{ok=document.execCommand('copy')}catch(e){}
+  if(ok){toast('已复制 · 去微信「文件传输助手」粘贴');return}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(
+      function(){toast('已复制 · 去微信「文件传输助手」粘贴')},
+      function(){toast('复制没成 · 请长按文本框手动全选复制')});
+  }else toast('复制没成 · 请长按文本框手动全选复制');
+}
+function importFromPasted(){
+  var t=el('impTxt'),raw=t?String(t.value||'').trim():'';
+  if(!raw){toast('还没粘内容');return}
+  var o;
+  try{o=JSON.parse(raw)}catch(e){toast('这段读不出来：'+String(e.message||e));return}
+  if(!o||typeof o!=='object'||!('sources' in o)){toast('里面没有 sources 字段');return}
+  qClose();
+  applyImport(o,function(){});
+}
+function applyImport(o,done){
+  var cnt=S.sources.length;
+  ask({title:'导入会覆盖本机现在的数据',danger:1,ok:'覆盖导入',
+    body:'本机现在有 '+cnt+' 条记录，导入后<b>被这份文件整个替掉</b>。<br>'
+      +'<span style="font-size:11px;color:#5F5E5A">覆盖前会<b>先自动存一份备份</b>'
+      +' —— 万一导错了，去「数据」里点「找回」。</span>',
+    onOk:function(){saveBak();
+      absorbImgs(o,function(oo){
+        S=oo;save();renderAll();
+        toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');if(done)done();
+      });},
+    onCancel:function(){if(done)done()}});
 }
 function doImport(inp){
   var f=inp.files&&inp.files[0];if(!f)return;
@@ -5493,17 +5549,7 @@ function doImport(inp){
     try{
       var o=JSON.parse(fr.result);
       if(!o||typeof o!=='object'||!('sources' in o))throw new Error('里面没有 sources 字段');
-      var cnt=S.sources.length;
-      ask({title:'导入会覆盖本机现在的数据',danger:1,ok:'覆盖导入',
-        body:'本机现在有 '+cnt+' 条记录，导入后<b>被这份文件整个替掉</b>。<br>'
-          +'<span style="font-size:11px;color:#5F5E5A">覆盖前会<b>先自动存一份备份</b>'
-          +' —— 万一导错了，去「数据」里点「找回」。</span>',
-        onOk:function(){saveBak();
-          absorbImgs(o,function(oo){
-            S=oo;save();renderAll();
-            toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');inp.value='';
-          });},
-        onCancel:function(){inp.value=''}});
+      applyImport(o,function(){inp.value=''});
     }catch(e){
       ask({title:'这个文件读不出来',only:1,ok:'知道了',body:esc(String(e.message||''))});
     }
@@ -5910,7 +5956,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.6';
+var VER='V26.7';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
