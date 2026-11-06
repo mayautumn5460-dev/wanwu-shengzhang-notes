@@ -1090,6 +1090,28 @@ function tsFull(t){
   if(!m)return t;
   return m[1]+'-'+m[2]+'-'+m[3]+'  '+(m[4]||'00')+':'+(m[5]||'00')+':'+(m[6]||'00');
 }
+/* V26.9：记录怎么摆，只有一条规矩 —— 后写的在上、早写的往下沉。
+   nowStamp() 只精确到秒：同一秒存的两篇，或从旧备份带进来缺戳的记录，
+   老 comparator 会退化成「看数组运气」，于是出现「早的在上、新写的在下」。
+   这里统一兜底：戳一样 / 都没戳时，按录入先后判（数组里靠前的 = 后录的）。 */
+function cmpNewFirst(a,b){
+  var x=String((a&&a.created_at)||''),y=String((b&&b.created_at)||'');
+  if(x!==y)return x>y?-1:1;
+  return 0;
+}
+function sortNewFirst(arr,pick){
+  pick=pick||function(s){return s};
+  return arr.map(function(s,i){return {s:s,i:i}}).sort(function(p,q){
+    return cmpNewFirst(pick(p.s),pick(q.s))||(p.i-q.i);
+  }).map(function(p){return p.s});
+}
+/* 生长图专用：早的先入 DIARY（行 0 画在最底部），新的往上堆 —— 顶部＝最新一篇 */
+function sortOldFirst(arr,pick){
+  pick=pick||function(s){return s};
+  return arr.map(function(s,i){return {s:s,i:i}}).sort(function(p,q){
+    return -cmpNewFirst(pick(p.s),pick(q.s))||(q.i-p.i);
+  }).map(function(p){return p.s});
+}
 function today(){var d=new Date();return d.toISOString().slice(0,10)}
 function dAgo(n){var d=new Date();d.setDate(d.getDate()-n);return d.toISOString().slice(0,10)}
 function daysBetween(a,b){return Math.round((new Date(b)-new Date(a))/86400000)}
@@ -1610,8 +1632,7 @@ function ledScan(w){
     if((s.state||'active')!=='active')return;
     if(String(s.text||'').indexOf(w)>=0)out.push(s);
   });
-  out.sort(function(a,b){return (a.created_at||'')<(b.created_at||'')?1:-1});
-  return out;
+  return sortNewFirst(out);
 }
 function ledBanned(it,srcId,w){
   var a=it.no||[];
@@ -1638,8 +1659,7 @@ function ledHits(it){
       m[s.id].ws.push(w);
     });
   });
-  out.sort(function(a,b){return (a.src.created_at||'')<(b.src.created_at||'')?1:-1});
-  return out;
+  return sortNewFirst(out,function(x){return x.src});
 }
 function ledSnip(t,w){
   var i=t.indexOf(w);if(i<0)return '';
@@ -2256,7 +2276,8 @@ function saveSource(mod){
   var s={id:uid('s'),text:t,created_at:nowStamp(),state:'active',deleted_at:null,
     mod:mod,imgs:PEND_IMG.slice(0,6),title:autoTitle(t)};
   s.imgs=packImgs(s.imgs,s);   /* V26.2：可用时转存大仓库，不可用则原样留在本体 */
-  S.sources.push(s);
+  /* V26.9：新记录放数组最前 —— 连按录入顺序摆的界面也是「后写的在上」 */
+  S.sources.unshift(s);
   /* 🔴 只有知识模块抽知识点。点滴模块是事件和感受，不是知识点 ——
      往里面抽知识点，等于把「今天有点难过」当成一条可考核的条目。 */
   if(mod==='知识模块'){
@@ -2602,7 +2623,7 @@ function tabClose(i){
 /* 开机/切模块：这一格自动放上那个模块最后存的一篇（不算一次回看 —— 你还没看它） */
 function bootTab(mod){
   var a=S.sources.filter(function(s){return s.state==='active'&&(!mod||s.mod===mod)});
-  a.sort(function(x,y){return (x.created_at||'')<(y.created_at||'')?1:-1});
+  a=sortNewFirst(a);
   TABS=[a.length?a[0].id:null];TCUR=0;OPEN=TABS[0];
 }
 function openSrc(id){
@@ -2769,7 +2790,7 @@ function renderSrcList(){
         +'「'+other+'」里有 '+n2+' 条 —— 切过去看</button></div>':'')+'</div>';
     return;
   }
-  var sorted=hit.slice().sort(function(a,c){return a.created_at<c.created_at?1:-1});
+  var sorted=sortNewFirst(hit);   /* V26.9：新的在上，同秒 / 缺戳按录入先后兜底 */
   /* 默认只摆最近 5 条 —— 一屏塞几十条会把大屏挤没。要找全的走搜索，或点开全部。 */
   var all=(q||LISTALL),show=all?sorted:sorted.slice(0,5);
   b.innerHTML=show.map(function(s){
@@ -5295,6 +5316,7 @@ function loadDemo(){
       if(old){
         var have={};S.sources.forEach(function(s){have[s.id]=1});
         old.sources.forEach(function(s){if(!have[s.id])S.sources.push(s)});
+        S.sources=sortNewFirst(S.sources);   /* V26.9：并完仍按「新的在上」摆好 */
         S.marks=old.marks.concat(S.marks);
         S.events=old.events.concat(S.events);S.reviews=old.reviews.concat(S.reviews);
         S.chronicle=old.chronicle.concat(S.chronicle);S.quiz=old.quiz.concat(S.quiz);
@@ -5652,7 +5674,8 @@ function applyImport(o,done){
     onOk:function(){
       var go=function(){saveBak();
         absorbImgs(o,function(oo){
-          S=oo;if(!save()){toast('导入没存住 · 本机数据未改动');if(done)done();return}
+          S=oo;S.sources=sortNewFirst(S.sources||[]);   /* V26.9：整包导入后也按「新的在上」 */
+          if(!save()){toast('导入没存住 · 本机数据未改动');if(done)done();return}
           renderAll();
           toast('导入完成 · 原来那 '+cnt+' 条存了一份备份');if(done)done();
         });};
@@ -5702,6 +5725,7 @@ function applyMerge(o,done){
         S.sources=S.sources.map(function(s){
           if(byId[s.id]){replaced++;return byId[s.id]}return s});
         Object.keys(byId).forEach(function(id){if(!have[id])S.sources.push(byId[id])});
+        S.sources=sortNewFirst(S.sources);   /* V26.9：并入后按「新的在上」摆好 */
         if(!save()){toast('并入没存住 · 本机数据未改动');if(done)done();return}
         renderAll();
         toast('并入完成 · 新增 '+add.length+' 条、更新 '+replaced+' 条');
@@ -5761,7 +5785,7 @@ function renderShare(){
   if(!list.length){
     h+='<div class="share-empty">还没有记录可以勾。</div>';
   }else{
-    h+='<div class="chk-list">'+list.slice().reverse().map(function(s){
+    h+='<div class="chk-list">'+sortNewFirst(list).map(function(s){
       var t=s.title||autoTitle(s.text||'');
       var pv=(s.text||'').replace(/\n/g,' ').slice(0,60);
       return '<label class="chk"><input type="checkbox" onclick="shareCheck(\''
@@ -6124,7 +6148,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.8';
+var VER='V26.9';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
@@ -6197,9 +6221,11 @@ var SPNAME={clematis:'铁线莲',trumpet:'凌霄',wisteria:'紫藤'};
 
 /* ---------- 数据：从真实的点滴模块记录里来 ---------- */
 function feed(){
-  var list=(S.sources||[]).filter(function(s){
+  /* V26.9：早的先入 DIARY（行 0 在最底部），新的往上堆 —— 顶部＝最新一篇。
+     同秒 / 缺戳时按录入先后兜底，不再把新写的压到下面。 */
+  var list=sortOldFirst((S.sources||[]).filter(function(s){
     return s.mod==='点滴模块'&&(s.state||'active')==='active';
-  }).slice().sort(function(a,b){return (a.created_at||'')<(b.created_at||'')?-1:1});
+  }));
   /* 接了模型才开花：花的来源是「一次有根据的判断」，本机规则造不出这个来源 */
   MODE=(AICFG&&AICFG.key)?'ai':'local';
   DIARY=list.map(function(s,i){
