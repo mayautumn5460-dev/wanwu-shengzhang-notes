@@ -630,6 +630,11 @@ summary{font-size:12px;color:var(--ink3);cursor:pointer;padding:4px 0}
 .mdbar button.i{font-style:italic;font-family:Georgia,serif}
 .mdbar .sp{width:1px;height:16px;background:var(--line2);margin:0 3px}
 .mdbar .tip{margin-left:auto;font-size:11px;color:var(--ink3)}
+/* V26.11：输入区「读入 .md 文件 / 看排版」那一行，与它下面的预览层 */
+.inrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.inrow button.sm{font-size:11px;padding:3px 9px}
+.intip{font-size:11px;color:var(--ink3)}
+.inprev{min-height:88px;border:1px dashed var(--line2)}
 .delbtn{font-size:11px!important;padding:2px 8px!important;border-color:transparent!important;
   color:var(--ink3)!important;background:transparent!important}
 .delbtn:hover{color:#A32D2D!important;border-color:var(--line2)!important}
@@ -799,7 +804,15 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
       <div class="hint">读书笔记、复盘、闪念、从别处复制来的一段话，都行。存的时候不会打扰你。</div>
       <div id="engineTag"></div>
       <div id="mdBar"></div>
-      <textarea id="inText" placeholder="记录想看见的自己" oninput="mdLinkAC(this);draftKick()"></textarea>
+      <!-- V26.11：读入外部 .md 文件 + 输入区预览。框始终是纯文本；
+           预览只是同一段字的另一扇窗，存下去的仍是原文，格式符号一个不改写。 -->
+      <div class="inrow">
+        <button class="g sm" onclick="pickMdFile()">↑ 读入 .md 文件</button>
+        <button class="g sm" id="inPrevBtn" style="display:none" onclick="toggleInPrev()">看排版</button>
+        <span class="intip" id="inPrevNote" style="display:none"></span>
+      </div>
+      <textarea id="inText" placeholder="记录想看见的自己" oninput="mdLinkAC(this);draftKick();updateInPrevBtn()"></textarea>
+      <div id="inPreview" class="dtext mdbox inprev" style="display:none"></div>
       <div id="draftStat" class="dstat"></div>
       <div class="modpick" id="modPick">
         <button class="p modbtn know" onclick="saveSource('知识模块')">存下来 · 知识模块</button>
@@ -809,6 +822,8 @@ if('serviceWorker' in navigator && location.protocol!=='file:'){
         <button class="g" onclick="fillDemoText()">填一段示例</button>
       </div>
       <input type="file" id="inImg" accept="image/*" multiple style="display:none" onchange="pickImgs(this)">
+      <!-- accept 刻意放宽：手机系统常不认 .md 这个后缀，只写 .md 会把文件灰掉选不了。 -->
+      <input type="file" id="inMd" accept=".md,.markdown,.mdtxt,.txt,text/markdown,text/plain,*/*" style="display:none" onchange="readMdFile(this)">
       <div id="imgPend"></div>
       <div id="savedBox"></div>
     </div>
@@ -1167,8 +1182,10 @@ function isMd(t){
     ||/^\s*\|.*\|/m.test(t)||/\*\*[^*\n]+\*\*/.test(t);
 }
 /* 详情面板：排版后的样子（原文另有一键切回，永远不丢） */
-function mdRender(t){
-  t=String(t||'');
+function mdRender(t,opts){
+  /* V26.11：Windows 的 .md 是 CRLF；不归一，表格行末尾多出的 \r 会让整块表格
+     认不出来、散成一排竖线。只归一「拿来排版用的副本」，不改写存着的原文。 */
+  t=String(t||'').replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
   t=t.replace(/^---\s*\n[\s\S]*?\n---\s*\n/,'');
   t=esc(t);
   t=t.replace(/```([\s\S]*?)```/g,'<pre class="mdpre">$1</pre>');
@@ -1179,6 +1196,10 @@ function mdRender(t){
   t=t.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<i>$2</i>');
   t=t.replace(/`([^`\n]*)`/g,'<code class="mdcode">$1</code>');
   t=t.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,function(m,a,b){
+    /* V26.11：预览的是「还没归档的草稿」—— 双链只能当普通字看。
+       做成可点链接会跳去别的笔记、甚至弹「要新建一篇吗」，那不是预览该干的事。
+       esc(t) 已经跑过，a/b 都是转义后的文本，直接返回是安全的。 */
+    if(opts&&opts.noLink)return b||a;
     return '<a class="mdlink" onclick="openLink('+JSON.stringify(a)+')">'+(b||a)+'</a>';});
   t=t.replace(/^[ \t]{0,3}>[ \t]?(.*)$/gm,'<div class="mdq">$1</div>');
   t=t.replace(/^[ \t]*[-*+][ \t]+(.+)$/gm,'<div class="mdli">· $1</div>');
@@ -1196,6 +1217,75 @@ function mdRender(t){
   });
   t=t.replace(/\n{2,}/g,'<br><br>').replace(/\n/g,'<br>');
   return t;
+}
+
+/* ===== V26.11：读入外部 .md 文件 + 输入区预览（2026-11-07）=====
+   两条路一起走，但只动「输入区」这一层：
+   ① 选一个文件 → 文字原样灌进 inText → 立刻写成草稿 → 认出是 markdown 就自动切成排版；
+   ② 点「看排版 / 看原文」在同一块地方来回切，框始终是纯文本。
+   🔴 INPREV 与详情的 MDRAW 刻意分成两个变量：一个管「还没归档的草稿」，
+      一个管「已经存下的记录」。存档后框会清空，回看与改正文仍得靠详情那个按钮，
+      所以详情的「看原文／看排版」保留，不是重复。
+   🔴 不换富文本编辑器：原文一字不动是所有下游（草稿 / 双链 / mdClean /
+      搜索 / 导出导入）共用的地基，换成 HTML 就得把它们全重做一遍。 */
+var INPREV=false;
+function updateInPrevBtn(){
+  var ta=el('inText'),btn=el('inPrevBtn');
+  if(!btn||!ta)return;
+  var md=isMd(ta.value);
+  if(!md&&INPREV){INPREV=false;renderInPrev();return}
+  btn.style.display=md?'':'none';
+  btn.textContent=INPREV?'看原文':'看排版';
+}
+function renderInPrev(){
+  var ta=el('inText'),pv=el('inPreview'),bar=el('mdBar'),
+      btn=el('inPrevBtn'),note=el('inPrevNote');
+  var t=ta?ta.value:'',md=isMd(t);
+  if(!md)INPREV=false;
+  if(ta)ta.style.display=INPREV?'none':'';
+  /* 预览时把插符号的按钮收起来：框已经藏了，点了会往看不见的地方插东西 */
+  if(bar)bar.style.display=INPREV?'none':'';
+  if(btn){btn.style.display=md?'':'none';btn.textContent=INPREV?'看原文':'看排版'}
+  if(note){note.style.display=INPREV?'':'none';
+    note.textContent=INPREV?'这是预览，改不了字 · 要改请点「看原文」':''}
+  if(pv){
+    pv.style.display=INPREV?'':'none';
+    pv.innerHTML=INPREV?mdRender(t,{noLink:true}):'';
+  }
+}
+function toggleInPrev(){INPREV=!INPREV;renderInPrev()}
+function pickMdFile(){var f=el('inMd');if(f)f.click()}
+function readMdFile(inp){
+  var f=inp.files&&inp.files[0];
+  inp.value='';                 /* 允许连着选同一个文件 */
+  if(!f)return;
+  if(f.size>4*1024*1024){
+    toast('这份太大了（'+Math.round(f.size/1048576)+'MB）—— 本地笔记放不下，先拆小一点');return}
+  var big=f.size>1024*1024;
+  var fr=new FileReader();
+  fr.onerror=function(){toast('这个文件读不出来')};
+  fr.onload=function(){
+    var t=String(fr.result||'');
+    /* BOM 会让开头多一个怪字符；CRLF 会让表格散架。只清洗「读进来的这一份」，
+       存进 s.text 的就是干净文本，AI 取原文 / 搜索 / 导出都跟着受益。 */
+    t=t.replace(/^\uFEFF/,'').replace(/\r\n?/g,'\n');
+    var bad=(t.match(/\uFFFD/g)||[]).length;   /* GBK 之类非 UTF-8 文件会炸出替换符 */
+    draftGuard(function(){fillInText(t,f.name,bad,big)});
+  };
+  fr.readAsText(f,'UTF-8');
+}
+function fillInText(t,name,bad,big){
+  var ta=el('inText');if(!ta)return;
+  ta.value=t;
+  /* 一大段字不等 800ms 防抖：立刻写进草稿，切后台 / 刷新也不会丢。 */
+  clearTimeout(DTIMER);
+  if(!draftPutText(t,true)){toast('草稿没存上：本地空间满');return}
+  draftStat();
+  INPREV=isMd(t);              /* 认出 markdown 就自动切成排版，先让你看一眼 */
+  renderInPrev();
+  toast('读进来了 ·「'+name+'」'+t.length+' 字 · 还没归档'
+        +(bad?' · 有 '+bad+' 处乱码，这文件可能不是 UTF-8':'')
+        +(big?' · 这份不小，若提示存不下请先导出备份':''));
 }
 /* ===== 输入框上面那一行工具（2026-11-01）=====
    只给<b>真排得出来的</b>按钮：下面 mdRender 认什么，这里才给什么。
@@ -2398,6 +2488,7 @@ function saveSource(mod){
   ev('save',s.id,'存下一段（'+t.length+' 字）'+(s.imgs.length?' + '+s.imgs.length+' 张图':''),null,mod);
   mile('first_save');
   el('inText').value='';
+  INPREV=false;renderInPrev();   /* V26.11：框清空了，预览层跟着收起、按钮回到隐藏 */
   PEND_IMG=[];renderPendImg();
   el('savedBox').innerHTML='<div class="saved">存好了 · 进的是<b>'+mod+'</b>。'
     +(mod==='知识模块'
@@ -4743,7 +4834,10 @@ function mdText(s){
     +'<button class="g del" onclick="askDel(\''+s.id+'\')">删除</button>';
   /* 「看原文 / 看排版」只在内容确是 markdown 时才出现：普通流水账没有格式符号，
      原文和排版长一个样，这俩按钮是噪音，反而让人以为自己在用一个 markdown 编辑器。
-     真·markdown 文档（Obsidian 导入等）才需要它来回切。 */
+     真·markdown 文档（Obsidian 导入等）才需要它来回切。
+     V26.11：输入区也加了预览（INPREV），但那个管的是「还没归档的草稿」；
+     这里管的是「已经存下的记录」。存档后输入框会清空，回看、改正文仍得靠本按钮，
+     两者不是重复 —— 别因为输入区有了预览就把这个删掉。 */
   if(md){
     head+='<button class="g" style="font-size:11px;padding:2px 8px" onclick="MDRAW=!MDRAW;renderAll()">'
       +(MDRAW?'查看markdown文件展示版面':'查看markdown文件原文')+'</button>';
@@ -6260,7 +6354,7 @@ function fbCopy(){
 function closeFb(){el('fbMask').className='mask'}
 
 /* 版本号：每次改动都要 +1。用户看不到这个号 = 他打开的是浏览器缓存里的旧文件。 */
-var VER='V26.10';
+var VER='V26.11';
 (function(){
   var t=document.getElementById('verTag');
   if(t)t.textContent='版本 '+VER;
@@ -7208,6 +7302,7 @@ bootTab(CURMOD);      /* 开机：大屏那一格自动放上最后存的一篇�
 (function(){var b=el('mdBar');if(b)b.innerHTML=mdBar('inText')})();   /* 输入框上面那一行工具 */
 renderAll();
 draftBoot();      /* 上次没写完的草稿，开机填回输入框 */
+renderInPrev();   /* V26.11：草稿若是 markdown，把「看排版」点亮（不自动切预览） */
 /* Esc 关内页（弹窗开着时不抢） */
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
